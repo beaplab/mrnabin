@@ -1,0 +1,21 @@
+# Algorithm parameters
+k: 4
+selection_percentiles_low: 85.0
+selection_percentiles_high: 95.0
+creation_threshold: 0.1
+selection_threshold: 0.175
+cluster_thresholds:
+  - 0.02
+  - 0.03125
+  - 0.04
+  - 0.05
+  - 0.0625
+reduction_constant: 16.0
+final_threshold: 0.5
+
+verbose: false
+labeled: false
+compact: false
+minimal: false
+prefix_len: 2
+

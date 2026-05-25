@@ -1,0 +1,15 @@
+# Algorithm parameters
+min_seq_len: 3000
+min_cluster_size: 6
+xchi_thresh: 255.0
+absorb_thresh: 0.500
+cv_outlier_ratio: 2.00
+skip_remove: false
+
+# DistBin parameter overwrite
+final_threshold: 0.175
+
+#
+verbose: false
+labeled: false
+prefix_len: 2

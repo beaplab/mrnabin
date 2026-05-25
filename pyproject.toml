@@ -1,0 +1,61 @@
+[project]
+name = "mrnabin"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "numba>=0.64.0",
+    "numpy>=2.2.1",
+    "pyyaml>=6.0.3",    
+    "scipy>=1.15.0",
+]
+
+
+# [project.scripts]
+# distbin = "distbin:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/distbin", "src/vlp", "src/lib"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "black>=24.10.0",
+    "flake8>=7.1.1",
+    "isort>=5.13.2",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.0",
+    "mypy>=1.15",
+    "pytest>=8.3.4",
+    "scipy-stubs>=1.15.0.0",
+    "types-pyyaml>=6.0.12.20250915",    
+]
+
+[tool.black]
+line-length = 120
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.mypy]
+warn_unused_configs = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = "numba.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+filterwarnings = [
+     'ignore:ast.Str is deprecated:DeprecationWarning',
+     'ignore:ast.NameConstant is deprecated:DeprecationWarning',
+]

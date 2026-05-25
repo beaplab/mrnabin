@@ -1,0 +1,9 @@
+# File paths
+mrna_path: data/a14/A14.Trinity.fasta
+peptide_path: data/a14/A14.Trinity.fasta.transdecoder.pep
+comp_path: data/a14/vs_pc_euk_seqs.txt
+homology_path: data/a14/A14.Trinity.vs.EukProt.tsv
+match_path: data/a14/A14.Trinity.contigs_vs_EukProt.counts.txt
+
+#
+deets: false

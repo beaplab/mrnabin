@@ -1,0 +1,11 @@
+# File paths (defaults)
+data_path: data/5686984/m_choanoflagellate_transcriptomes.mrnabin
+
+# Algorithm parameters
+min_seq_len: 3000
+min_cluster_size: 6
+xchi_thresh: 255.0
+thresh_next: 0
+
+#
+verbose: false

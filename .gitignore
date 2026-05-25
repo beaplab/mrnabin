@@ -1,0 +1,21 @@
+# Python-generated files
+__pycache__
+uv.lock
+
+# Virtual environments
+.venv
+
+# os/ide
+*~
+.DS_Store
+.claude
+CLAUDE.md
+
+# local
+data
+docs
+notebooks
+runs
+checkpoints
+profiles
+
