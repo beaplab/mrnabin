@@ -57,3 +57,9 @@ DistBin, and then proceeds as in VLP.
 ## Development
 
 `make pr` after changes
+
+## Testing
+
+We downloaded all of the [assembled transcriptomes from EukProt v03](https://doi.org/10.6084/m9.figshare.12417881.v3). We iteratively mixed all pairs of individual transcriptomes to create artificial mixtures of two species (or more, depending on the number of species in the transcriptome), in which the identity of each contig in the mixture is known. We ran DBV on each pairwise mixture and evaluated the number of correctly binned contigs (score from 0 to 1) and the number of bins produced by DBV. The results are summarized in the following figure (note that the scale for the score is not linear, to emphasize differences closer to 1).
+
+![Results of DBV on EukProt v03 assembled transcriptomes](mrnabin_DBV_test_EukProt_v03_assembled_transcriptomes.png)
