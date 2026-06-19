@@ -80,6 +80,18 @@ class TestWeakestCluster:
         result = weakest_cluster(scores, sequences, absorb_thresh=0.5, cv_outlier_ratio=1.25, verbose=False)
         assert result == 0
 
+    def test_keeps_last_cluster_despite_bad_model(self) -> None:
+        """With only one live cluster, never cull it — degrade to 1 bin, not 0."""
+        # Single live cluster (cluster 0); cluster 1 has no members. Cluster 0's
+        # per-base mean is below 0.01, which would otherwise trip the bad-model
+        # branch and collapse the binning to zero.
+        sequences = [_make_seq("A" * 100, cluster=0) for _ in range(3)]
+        scores = [ClusterScore(3), ClusterScore(3)]
+        scores[0].scores[:] = [0.1, 0.1, 0.1]
+        # cluster 1 keeps its all -inf init (no members)
+        result = weakest_cluster(scores, sequences, absorb_thresh=0.5, cv_outlier_ratio=1.25, verbose=False)
+        assert result == -1
+
     def test_picks_absorbable_cluster(self) -> None:
         """When max absorbability exceeds threshold, picks argmax(absorbability)."""
         sequences = self._two_cluster_seqs()

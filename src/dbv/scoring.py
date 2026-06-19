@@ -166,6 +166,17 @@ def weakest_cluster(
             continue
         cv[i] = float(arr.std() / m)
 
+    # Never propose removing the last surviving cluster. With only one live
+    # cluster there is nothing to absorb its members into, so culling it
+    # collapses the binning to zero bins. A monopolized seed set should
+    # degrade to 1 bin, not 0. (Without this guard the mean_norm_scores
+    # branch below picks the sole real cluster, since empty peers score inf.)
+    num_live = sum(1 for t in cluster_totals if t > 0)
+    if num_live <= 1:
+        if verbose:
+            print(f"Only {num_live} live cluster(s); skipping cull to avoid collapse to 0")
+        return -1
+
     # TODO: consider switching to additive: absorbability = alt_per_base - true_per_base
     # (log-likelihood difference; no zero-floor needed)
     absorbability = [a / max(t, 1.0) for a, t in zip(alt_scores, true_scores)]
