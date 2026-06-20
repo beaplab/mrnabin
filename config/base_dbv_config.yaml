@@ -2,8 +2,9 @@
 min_seq_len: 3000
 min_cluster_size: 6
 xchi_thresh: 255.0
-absorb_thresh: 0.500
+absorb_thresh: 0.700
 cv_outlier_ratio: 2.00
+cull_ll_tolerance: 0.000
 skip_remove: false
 
 # DistBin parameter overwrite

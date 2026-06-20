@@ -30,6 +30,7 @@ class DBVBinner:
         cluster_thresholds: tuple[float, ...] = DEFAULT_CLUSTER_THRESHOLDS,
         reduction_constant: float = 16.0,
         final_threshold: float = 0.175,
+        cull_ll_tolerance: float = 0.0,
         minimal: bool = False,
         verbose: bool = False,
         labeled: bool = False,
@@ -50,6 +51,7 @@ class DBVBinner:
         self.cluster_thresholds = cluster_thresholds
         self.reduction_constant = reduction_constant
         self.final_threshold = final_threshold
+        self.cull_ll_tolerance = cull_ll_tolerance
         self.minimal = minimal
         self.verbose = verbose
         self.labeled = labeled
@@ -102,6 +104,29 @@ class DBVBinner:
             if s.cluster == cluster_id:
                 s.cluster = -1
 
+    def _per_base_loglik(self, scores: list[ClusterScore]) -> float:
+        """Mean per-base log-likelihood of the current assignment.
+
+        Sum each assigned, active sequence's score under its own cluster model,
+        divided by the total assigned bases. Merging two distinct species forces
+        one species' members onto a foreign model where they score worse per base,
+        so this value drops sharply on a bad cull and stays flat/rises on a good
+        one (consolidating fragments of the same species).
+        """
+        total_ll = 0.0
+        total_bases = 0
+        for i, s in enumerate(self.sequences):
+            if not s.active or s.cluster == -1:
+                continue
+            sc = float(scores[s.cluster].scores[i])
+            if sc == -np.inf:
+                continue
+            total_ll += sc
+            total_bases += len(s.seq)
+        if total_bases == 0:
+            return -np.inf
+        return total_ll / total_bases
+
     def run(self) -> None:
         num_clusters = self._run_distbin()
         for len_thresh in self._len_threshs():
@@ -121,27 +146,47 @@ class DBVBinner:
                     flush=True,
                 )
 
-            while True:
-                scores = compute_scores(num_clusters, self.sequences, self.verbose)
-
-                if self.skip_remove:
+            scores = compute_scores(num_clusters, self.sequences, self.verbose)
+            while not self.skip_remove:
+                weakest_id = weakest_cluster(
+                    scores, self.sequences, self.absorb_thresh, self.cv_outlier_ratio, self.verbose
+                )
+                if weakest_id == -1:
                     break
-                else:
-                    weakest_id = weakest_cluster(
-                        scores, self.sequences, self.absorb_thresh, self.cv_outlier_ratio, self.verbose
-                    )
-                    if weakest_id == -1:
-                        break
-                    # Remove the cluster by unassigning all its members (set cluster to -1)
-                    self._remove_cluster(weakest_id)
-                    scores[weakest_id] = ClusterScore(len(self.sequences))  # re-init the scores for this cluster
-                    reassign(scores, self.sequences, self.verbose)
-                    if self.verbose and self.labeled:
+
+                # Tentatively cull the weakest cluster, then accept only if the
+                # assignment's per-base log-likelihood does not drop by more than
+                # cull_ll_tolerance. A good cull (consolidating same-species
+                # fragments) holds the likelihood flat or improves it; a bad cull
+                # (merging two species) tanks it, so we roll back and stop.
+                before_ll = self._per_base_loglik(scores)
+                saved = [s.cluster for s in self.sequences]
+                self._remove_cluster(weakest_id)
+                scores[weakest_id] = ClusterScore(len(self.sequences))  # re-init the scores for this cluster
+                reassign(scores, self.sequences, self.verbose)
+                new_scores = compute_scores(num_clusters, self.sequences, self.verbose)
+                after_ll = self._per_base_loglik(new_scores)
+
+                if after_ll < before_ll - self.cull_ll_tolerance:
+                    for s, c in zip(self.sequences, saved):
+                        s.cluster = c
+                    if self.verbose:
                         print(
-                            "GRADE AFTER CULL",
-                            grade_bins(*bins_by_id(self.sequences), prefix_len=self.prefix_len, limit=20),
+                            f"Rejecting cull of {weakest_id}: "
+                            f"per-base loglik {before_ll:.5f} -> {after_ll:.5f}",
                             flush=True,
                         )
+                    break
+
+                scores = new_scores
+                if self.verbose:
+                    print(f"Accepted cull of {weakest_id}: per-base loglik {before_ll:.5f} -> {after_ll:.5f}")
+                if self.verbose and self.labeled:
+                    print(
+                        "GRADE AFTER CULL",
+                        grade_bins(*bins_by_id(self.sequences), prefix_len=self.prefix_len, limit=20),
+                        flush=True,
+                    )
 
             if self.verbose and self.labeled:
                 print(
