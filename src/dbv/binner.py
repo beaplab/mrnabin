@@ -172,8 +172,7 @@ class DBVBinner:
                         s.cluster = c
                     if self.verbose:
                         print(
-                            f"Rejecting cull of {weakest_id}: "
-                            f"per-base loglik {before_ll:.5f} -> {after_ll:.5f}",
+                            f"Rejecting cull of {weakest_id}: " f"per-base loglik {before_ll:.5f} -> {after_ll:.5f}",
                             flush=True,
                         )
                     break
