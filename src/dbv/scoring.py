@@ -25,7 +25,8 @@ def _score_cluster(
     for i in range(len(sequences)):
         if not sequences[i].active:
             continue
-        seq = sequences[i].seq
+        # models are trained on oriented() sequences, so score the same strand
+        seq = sequences[i].oriented()
         score, var = vlp_trie.score(seq)
         cs.scores[i] = score
 

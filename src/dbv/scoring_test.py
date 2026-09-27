@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from lib.encoded_sequences import Sequence, encode_seq
+from lib.encoded_sequences import Sequence, encode_seq, reverse_complement
 
 from .scoring import ClusterScore, _relative_max_pct, compute_scores, reassign, weakest_cluster
 
@@ -115,3 +115,23 @@ class TestRelativeMaxPct:
 
     def test_ratio(self) -> None:
         assert _relative_max_pct([10.0, 2.0, 1.0]) == 5.0
+
+
+class TestScoresOrientedStrand:
+    def test_reverse_flagged_contig_scores_like_its_oriented_form(self) -> None:
+        """Models train on oriented(); scoring must use it too.
+
+        get_sequences keeps a reverse-strand contig as read and only sets
+        `reverse`, so scoring the raw `seq` scores the antisense strand.
+        """
+        rng = np.random.default_rng(0)
+        # skewed composition, so a strand and its reverse complement score differently
+        contig = "".join(rng.choice(list("ACGT"), size=400, p=[0.4, 0.3, 0.2, 0.1]))
+        forward = encode_seq(contig)
+        sequences = [
+            *[_make_seq(contig, cluster=0) for _ in range(3)],
+            Sequence(seq_id="fwd", seq=forward, cluster=-1, active=True),
+            Sequence(seq_id="rev", seq=reverse_complement(forward, True), reverse=True, cluster=-1, active=True),
+        ]
+        scores = compute_scores(1, sequences, verbose=False)[0].scores
+        assert scores[4] == scores[3]
