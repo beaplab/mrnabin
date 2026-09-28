@@ -24,6 +24,203 @@ scores 0.732 on EP00002+EP00271 while emitting only 3 bins; its *seeds* were
 already ~0.997 pure and the merge step collapsed them. That is where most of the
 improvement on DistBin's weak pairs comes from, not from ranks beating distances.
 
+## Current numbers, after the DBV orientation fix
+
+DBV's `_score_cluster` scored the raw contig while its tries were trained on
+the oriented one (fixed on main in ea0718c). `get_sequences` leaves
+reverse-strand contigs as read -- about half of every EukProt transcriptome --
+so every DBV and KNN -> VLP number measured before the fix scored half the
+contigs on the wrong strand. **All DBV and KNN -> VLP figures in the sections
+below this one are pre-fix.** KNN alone was unaffected: its loader orients.
+
+43 mixtures (seeded random 30 pairs + 6 triples, plus the 7 hard pairs):
+
+| config | bins | n90 | cov | r@4 | r@16 | p@4 | worst4 | sec |
+|---|---|---|---|---|---|---|---|---|
+| DBV | 7 | 5 | 0.876 | 0.614 | 0.763 | 0.862 | 0.498 | 157 |
+| KNN -> VLP, DBV-style merge, 16 seeds | 15 | 10 | 0.970 | 0.608 | **0.902** | **0.941** | 0.672 | 553 |
+| **KNN -> VLP, held-out merge (default)** | 9 | **3** | 0.932 | **0.822** | 0.868 | 0.930 | **0.769** | 1258 |
+
+(bins, n90 and sec are medians; the rest means. The held-out run used 12
+workers against 6 for the others, which inflates its time.)
+
+The fix alone moved DBV's r@16 from 0.659 to 0.763 (better on 39 of 43) and its
+coverage from 0.755 to 0.876, and the DBV-style KNN -> VLP from 0.773 to 0.902
+(better on all 43). The stored DBV EukProt sweep and figure on main predate it.
+
+The held-out merge beats DBV at r@4 on 40 of 43 mixtures (worst loss -0.14).
+Against the DBV-style merge it trades r@16 (0.868 vs 0.902: it merges harder
+and leaves 7% unbinned against 3%) for r@4 (0.822 vs 0.608).
+
+**How the held-out merge was chosen.** `scripts/merge_path_12417881.py
+--holdout` records full merge paths with out-of-fold scoring;
+`scripts/merge_path_analysis.py` compares stopping rules, tuned on one half of
+the mixtures and scored on the other. On the corrected paths:
+
+| rule | bins | r@4 | prec |
+|---|---|---|---|
+| best r@4, with labels | 8-9 | 0.85 | 0.92-0.95 |
+| guard on fit over all contigs, 0.002 | 8-11 | 0.81-0.84 | 0.92-0.94 |
+| guard on fit over assigned contigs, 0.002 | 6-7 | 0.78-0.83 | 0.92-0.93 |
+| BIC | 3-6 | 0.77 | 0.90-0.92 |
+| no merging | 32 | 0.44 | 0.94-0.97 |
+
+(ranges are the two halves.) With correct scoring the tolerant guard beats BIC
+and needs no fitted scale; its good range was 0.002-0.003 on both halves.
+Averaging fit over assigned contigs only has a failure mode a synthetic test
+caught: dissolving a species' last cluster leaves its contigs unassigned, which
+drops them from the average rather than lowering it.
+
+Held-out likelihood alone does not pick a bin count -- it is highest with no
+merging at all, because separate models for a species' sub-populations really
+do predict held-out contigs better. What held-out scoring buys is a better
+merge path: the best achievable r@4 rose from 0.70 to 0.745 before the fix,
+likely because in-sample a contig always looks good in the cluster whose model
+it trained.
+
+## Scored with a bin budget: the fragmentation problem
+
+Everything below this section was measured with `grade_bins`, which credits
+each bin's plurality organism, so thousands of tiny bins score as well as a
+handful of large ones. `lib.evaluate.budget_scores` scores only the N largest
+bins and counts everything else as unbinned: `r@N` is correct contigs in those
+bins over *all* contigs, which fragmentation cannot raise.
+
+Measured with `scripts/benchmark_12417881.py` on a seeded random sample (30
+EukProt pairs, 6 triples) plus the 7 hard pairs used below -- 43 mixtures.
+
+| config | bins (median) | r@4 | r@16 | r@64 | p@16 (median) | sec (median) |
+|---|---|---|---|---|---|---|
+| DBV (current config) | 5 | **0.558** | **0.659** | 0.659 | 0.907 | 164 |
+| KNN, old defaults | 3228 | 0.035 | 0.084 | 0.196 | 0.988 | 176 |
+| KNN, sweep to 0.002 (new defaults) | 160 | 0.411 | 0.630 | **0.822** | **0.957** | 471 |
+| same, sweep with veto to 1e-4 | 177 | 0.265 | 0.502 | 0.783 | 0.955 | 501 |
+| same, mean-fit assignment | 160 | 0.417 | 0.633 | 0.815 | 0.946 | 440 |
+
+(means, except where marked median)
+
+* **The old defaults' accuracy was almost all fragmentation.** Their 16
+  largest bins hold 8% of a mixture correctly.
+* **DBV emits 3-18 bins under its current config**, not the 384-1435 quoted
+  below, which came from an older sweep. It is far ahead at 4-16 bins, and it
+  sometimes collapses (2 bins at 0.44 precision on a triple).
+* **The warm-started sweep closes most of the gap**: r@16 0.084 -> 0.630 at
+  higher precision than DBV, and ahead of it from roughly 64 bins up.
+* **Nearest-member assignment (`assign_nearest`) is neutral** at this
+  coarseness.
+
+### KNN seeds merged by VLP
+
+`knn.vlp_merge.KNNVLPBinner`: KNN's largest `vlp_seed_bins` bins seed DBV's VLP
+phase in place of DistBin's. Same 43 mixtures:
+
+| config | bins (mean) | r@4 | r@16 | p@16 | worst4 | sec (median) |
+|---|---|---|---|---|---|---|
+| DBV | 7 | 0.558 | 0.659 | 0.864 | 0.429 | 164 |
+| KNN, sweep to 0.002 | 206 | 0.411 | 0.630 | 0.916 | 0.445 | 471 |
+| KNN -> VLP, 32 seeds | 23 | 0.458 | 0.777 | 0.930 | 0.533 | 981 |
+| KNN -> VLP, 16 seeds | 11 | **0.562** | **0.773** | 0.923 | **0.627** | 583 |
+
+Against DBV per mixture, 16 seeds: r@16 better on 37, worse on 2 (worst
+-0.06); r@4 better on 19, worse on 23; worst4 better on 32. The largest gains
+are on mixtures where DBV collapsed (EP00178+EP00657: r@16 0.05 -> 0.71).
+
+This reverses the earlier "VLP merging loses" result below. That merged ~1600
+fine bins before assignment, where one wrong merge is catastrophic; here VLP
+starts from 16 bins that already hold most of a mixture, and its likelihood guard
+stops at the first cull that lowers the fit. With 32 seeds VLP stopped at ~23
+bins, which is why fewer seeds did better at small budgets.
+
+### Choosing the number of bins
+
+`scripts/merge_path_12417881.py` records, per mixture, a full VLP merge path:
+KNN's 32 largest bins seed VLP, DBV's length schedule reassigns without culling,
+then the most absorbable cluster is dissolved and its contigs reassigned, one
+step at a time down to a single cluster. `scripts/merge_path_analysis.py` then
+compares label-free stopping rules along those paths, tuning each rule's
+parameter on half the mixtures and scoring it on the other half.
+
+**Two regimes.** On clean mixtures (starting precision >= 0.97, about half),
+precision stays flat down to roughly one bin per species and then collapses in
+one step, and the largest per-base log-likelihood drop sits exactly on that step
+(e.g. EP00163+EP01103, EP00610+EP01127, EP01111+EP01128 at 3 bins). On messier
+mixtures precision erodes gradually from the first dissolution; there is no
+clean species boundary to find.
+
+**DBV's likelihood guard is too sensitive.** Per-base log-likelihood wanders by
+~0.001 between harmless steps, so a zero-tolerance guard stops at the first
+wobble -- which is why KNN -> VLP halted at 11-23 bins.
+
+Scored on r@4 (a cross-species merge lowers it, extra bins cannot raise it),
+held-out half, damage threshold 0.03:
+
+| rule | bins (median) | r@4 | prec |
+|---|---|---|---|
+| best r@4, with labels | 9 | 0.696 | 0.928 |
+| BIC, lambda = 3000 | 9 | 0.628 | 0.922 |
+| guard, tolerance 0.002 | 9 | 0.606 | 0.913 |
+| stop before biggest LL drop | 4 | 0.622 | 0.876 |
+| absorbability < 0.3 | 9 | 0.603 | 0.859 |
+| MDL on trie states | 3 | 0.493 | 0.797 |
+| no merging (32 bins) | 32 | 0.384 | 0.944 |
+
+BIC picks the step minimising `-total_score + lambda * n_bins * log(assigned
+bases)`. Its tuning curve has a plateau at lambda 2000-4000; with the halves
+swapped it scores 0.633 / 0.898, where guard and absorbability reach similar
+r@4 (0.64-0.65) at precision ~0.86. It recovers ~90% of the labelled optimum.
+Charging for trie states instead (MDL) does worse: state counts barely change
+as clusters merge, because a merged trie is about as large as the two it
+replaces.
+
+Not yet built into `KNNVLPBinner`; the victim order (most absorbable first) was
+fixed throughout, and only the stopping point was chosen.
+
+### The both-signals veto
+
+Requiring both signals (`veto_both`) fragments less than requiring either, but
+sweeping to 1e-4 then lets cross-species merges through and precision falls
+below the fixed floor's. Neither threshold pair beat the floor:
+
+| config | r@4 | r@16 | r@64 | p@16 |
+|---|---|---|---|---|
+| floor 0.002, no veto | **0.411** | **0.630** | **0.822** | **0.916** |
+| either signal, to 1e-4 | 0.265 | 0.502 | 0.783 | 0.923 |
+| both, rel 0.08 / dist 1.15 | 0.318 | 0.532 | 0.788 | 0.904 |
+| both, rel 0.05 / dist 1.2 | 0.382 | 0.582 | 0.801 | 0.893 |
+
+### The warm-started sweep, and why the cliff was an artifact
+
+Each step starts Leiden from the previous step's membership. On the clean pair
+EP00002+EP00271 at k=1024 the two largest communities converged on the two
+organisms: 2 bins >= 32 at 0.991 purity covering 93% of the graph by
+resolution 1.4e-4, with no cross-species merge on the way. The collapse
+described under "Every mixture has a cliff" came from re-running Leiden cold at
+each resolution.
+
+Cross-species merges do still happen warm, but late and at mixture-dependent
+resolutions: 0.007 on a triple, 0.0017 on EP00178+EP00657, 0.0008 on
+EP00002+EP00178, never on EP00002+EP00271. Hence a fixed floor (0.002) for now.
+
+**The "largest community jumps" stopping rule does not work.** Within-species
+steps grew the largest community by up to 1.5x (early) and 1.24x (late, purity
+unchanged); cross-species ones by 1.26-1.33x.
+
+**Merge statistics that do separate them**, over 285 merges of two >= 90%-pure
+parts of >= 100 nodes on six mixtures (11 cross-species):
+
+| statistic | cross (median) | within (median) | AUC |
+|---|---|---|---|
+| rel = inter-part edge density / sqrt(internal densities) | 0.031 | 0.162 | 0.87 |
+| conductance of the cut | 0.046 | 0.338 | 0.86 |
+| 4-mer centroid distance / within-part distance | 1.24 | 1.09 | 0.88 |
+
+Vetoing on `rel < 0.08 or distance ratio > 1.15` catches 11/11 cross merges but
+also 31% of within-species ones -- and a vetoed pair is re-proposed and
+re-vetoed at every later step, so species stay split. End to end it lost
+(r@16 0.502 vs 0.630). The thresholds were fitted on 11 events, three of the six
+mixtures are in the benchmark sample, and a stricter rule (fewer false vetoes)
+was not tried.
+
 ## Results
 
 All 11 tested mixtures, current defaults.

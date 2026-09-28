@@ -16,7 +16,14 @@ import numpy as np
 import numpy.typing as npt
 
 from distbin.evaluate import distance_stats, selected_label_stats
-from knn.graph import BLOCK_SIZE, auto_n_neighbors, graph_stats, knn_indices_from_stack, mutual_knn_edges
+from knn.graph import (
+    BLOCK_SIZE,
+    auto_n_neighbors,
+    graph_stats,
+    knn_indices_from_stack,
+    merge_events,
+    mutual_knn_edges,
+)
 from lib.distances import kmer_distributions, stack_distributions, tv_cdist, tv_distance_matrix
 from lib.evaluate import all_pure, grade_bins
 from lib.selection import select_by_length_percentile, selection_report
@@ -40,12 +47,21 @@ class Binner:
         mutual: bool = True,
         quality: str = "cpm",
         resolution: float = 0.5,
+        resolution_sweep: bool = False,
+        sweep_factor: float = 0.7,
+        resolution_min: float = 1e-4,
+        sweep_veto: bool = False,
+        veto_both: bool = False,
+        veto_min_part: int = 100,
+        veto_rel: float = 0.08,
+        veto_distance: float = 1.15,
         n_iterations: int = 2,
         seed: int = 0,
         min_bin_size: int = 3,
         assign_remaining: bool = True,
         assign_top_bins: int = 5,
         assign_sample: int = 30,
+        assign_nearest: int = 0,
         max_bins: int = 0,
         target_coverage: float = 1.0,
         length_stages: Sequence[float] = (),
@@ -71,12 +87,21 @@ class Binner:
         self.mutual = mutual
         self.quality = quality
         self.resolution = resolution
+        self.resolution_sweep = resolution_sweep
+        self.sweep_factor = sweep_factor
+        self.resolution_min = resolution_min
+        self.sweep_veto = sweep_veto
+        self.veto_both = veto_both
+        self.veto_min_part = veto_min_part
+        self.veto_rel = veto_rel
+        self.veto_distance = veto_distance
         self.n_iterations = n_iterations
         self.seed = seed
         self.min_bin_size = min_bin_size
         self.assign_remaining = assign_remaining
         self.assign_top_bins = assign_top_bins
         self.assign_sample = assign_sample
+        self.assign_nearest = assign_nearest
         self.max_bins = max_bins
         self.target_coverage = target_coverage
         # CLI list arguments arrive as strings
@@ -110,7 +135,7 @@ class Binner:
         selection = self._select_labels()
 
         edges = self._build_graph(selection)
-        bins = self._partition(selection, edges)
+        bins = self._partition(selection, edges, sweep=self.resolution_sweep)
         bins, _ = self._drop_small_bins(bins)
         bins = self._keep_largest(bins)
 
@@ -184,27 +209,111 @@ class Binner:
 
         return edges
 
-    def _partition(self, labels: list[str], edges: npt.NDArray[np.int64]) -> list[set[str]]:
+    def _partition(self, labels: list[str], edges: npt.NDArray[np.int64], sweep: bool = False) -> list[set[str]]:
         # .tolist() rather than a comprehension: there can be millions of edges
         graph = ig.Graph(n=len(labels), edges=edges.tolist(), directed=False)
-        partition = leidenalg.find_partition(
-            graph,
-            PARTITION_TYPES[self.quality],
-            resolution_parameter=self.resolution,
-            n_iterations=self.n_iterations,
-            seed=self.seed,
-        )
-        bins = [set(labels[i] for i in community) for community in partition]
-        bins = sorted([b for b in bins if b], key=len, reverse=True)
+        if sweep:
+            membership, resolution = self._sweep_resolution(graph, edges, labels)
+        else:
+            resolution = self.resolution
+            membership = self._leiden(graph, resolution).membership
+        communities: dict[int, set[str]] = {}
+        for i, community in enumerate(membership):
+            communities.setdefault(community, set()).add(labels[i])
+        bins = sorted(communities.values(), key=len, reverse=True)
 
         if self.verbose:
-            verb = f"Leiden ({self.quality}, resolution {self.resolution}).\n"
+            verb = f"Leiden ({self.quality}, resolution {resolution:.3g}).\n"
             print(
-                f"K.1. {self.resolution if self.compact else verb}",
+                f"K.1. {resolution if self.compact else verb}",
                 self._one_line_bin_stats(bins),
                 all_pure(bins, self.prefix_len) if self.labeled else " ",
             )
         return bins
+
+    def _leiden(
+        self, graph: ig.Graph, resolution: float, initial: list[int] | None = None
+    ) -> leidenalg.VertexPartition:
+        return leidenalg.find_partition(
+            graph,
+            PARTITION_TYPES[self.quality],
+            initial_membership=initial,
+            resolution_parameter=resolution,
+            n_iterations=self.n_iterations,
+            seed=self.seed,
+        )
+
+    def _sweep_resolution(
+        self, graph: ig.Graph, edges: npt.NDArray[np.int64], labels: list[str]
+    ) -> tuple[list[int], float]:
+        """Coarsen by lowering resolution from `resolution` to `resolution_min`.
+
+        Each step starts Leiden from the previous membership, so the partitions
+        coarsen continuously rather than being re-drawn from scratch.  That
+        matters: warm-started, the two largest communities on one clean pair
+        converged on the two organisms (2 bins >= 32 at 0.991 purity) with no
+        cross-species merge down to 1e-4.
+
+        With `sweep_veto`, every community that joins two parts of at least
+        `veto_min_part` nodes is checked and split back into its previous parts
+        if any pair fails `_is_suspect`.  Off by default: it refuses ~31% of
+        within-species merges, again at every later step, and cost 0.13 of
+        recall in the 16 largest bins against a fixed floor.
+
+        A fixed resolution cannot be right: the first cross-species merge came
+        at 0.007, 0.0017 and 0.0008 on three mixtures and never on a fourth.
+        And the largest community's growth does not mark it either -- within-
+        species steps grew it by up to 1.5x, cross-species ones by 1.26-1.33x.
+        """
+        resolution = self.resolution
+        membership = np.array(self._leiden(graph, resolution).membership, dtype=np.int64)
+        vetoed = 0
+        while resolution * self.sweep_factor >= self.resolution_min:
+            resolution *= self.sweep_factor
+            proposed = np.array(self._leiden(graph, resolution, membership.tolist()).membership, dtype=np.int64)
+            if not self.sweep_veto:
+                membership = proposed
+                continue
+            suspect = {
+                community
+                for community, a, b, rel in merge_events(edges, membership, proposed, self.veto_min_part)
+                if self._is_suspect(labels, a, b, rel)
+            }
+            for community in suspect:
+                nodes = proposed == community
+                # previous ids shifted past the proposed ones so they cannot collide
+                proposed[nodes] = membership[nodes] + int(proposed.max()) + 1
+            vetoed += len(suspect)
+            # Leiden wants community ids in [0, n)
+            membership = np.unique(proposed, return_inverse=True)[1].astype(np.int64)
+
+        if self.verbose and not self.compact:
+            print(f"Swept resolution to {resolution:.3g}, vetoing {vetoed} merges.")
+        return membership.tolist(), resolution
+
+    def _is_suspect(self, labels: list[str], a: npt.NDArray[np.int64], b: npt.NDArray[np.int64], rel: float) -> bool:
+        """Whether joining parts a and b looks like a cross-species merge.
+
+        Two signals: the parts are sparsely connected relative to their own
+        internal density, or their 4-mer profiles are far apart relative to
+        their own spread.  Over 285 merges of two >= 90%-pure parts on six
+        mixtures, requiring either caught all 11 cross-species merges but
+        refused 31% of within-species ones; `veto_both` requires both, trading
+        recall of cross merges for far fewer refusals.
+        """
+        sparse = rel < self.veto_rel
+        if sparse != self.veto_both:
+            # decided without the distance: either-mode and sparse, or both-mode and not
+            return sparse
+        rng = np.random.default_rng(self.seed)
+        sample_a = stack_distributions(
+            self.kmer_distributions, [labels[i] for i in rng.choice(a, min(100, a.size), replace=False)]
+        )
+        sample_b = stack_distributions(
+            self.kmer_distributions, [labels[i] for i in rng.choice(b, min(100, b.size), replace=False)]
+        )
+        within = (tv_cdist(sample_a, sample_a).mean() + tv_cdist(sample_b, sample_b).mean()) / 2
+        return bool(tv_cdist(sample_a, sample_b).mean() > self.veto_distance * within)
 
     def _drop_small_bins(self, bins: list[set[str]]) -> tuple[list[set[str]], set[str]]:
         """Leiden on a mutual-kNN graph leaves isolated nodes as singletons."""
@@ -228,6 +337,12 @@ class Binner:
         The internal distances are what put every bin on its own scale: a tight
         bin and a diffuse one are then comparable, which a raw distance
         comparison never is.
+
+        With `assign_nearest` = m > 0 the scale is of each sampled member's mean
+        distance to its m nearest fellow members, not of all pairwise distances.
+        A coarse bin is a union of fine ones, so its all-pairs distances are
+        multi-modal and one (mu, sigma) describes them badly; distances to
+        nearest members stay local however many modes the bin has.
         """
         rng = np.random.default_rng(self.seed)
         members = [sorted(b) for b in bins]
@@ -235,16 +350,35 @@ class Binner:
         stacks = [stack_distributions(self.kmer_distributions, list(s)) for s in samples]
         centroids = np.stack([np.median(stack_distributions(self.kmer_distributions, m), axis=0) for m in members])
 
-        intra = [tv_cdist(s, s)[np.triu_indices(len(s), 1)] for s in stacks]
+        if self.assign_nearest > 0:
+            intra = [self._nearest_mean(tv_cdist(s, s), exclude_self=True) for s in stacks]
+        else:
+            intra = [tv_cdist(s, s)[np.triu_indices(len(s), 1)] for s in stacks]
         mean = np.array([i.mean() if i.size else 0.0 for i in intra])
         spread = np.array([i.std() if i.size else 0.0 for i in intra]) + SPREAD_FLOOR
         widest = np.array([i.max() if i.size else np.inf for i in intra])
         return centroids, stacks, mean, spread, widest
 
+    def _nearest_mean(self, d: npt.NDArray[np.float64], exclude_self: bool = False) -> npt.NDArray[np.float64]:
+        """Mean of each row's `assign_nearest` smallest distances.
+
+        Members are compared with one fewer candidate than outsiders (themselves
+        excluded), so m is capped at sample size - 1 for both, keeping the two
+        statistics on the same footing.
+        """
+        m = min(self.assign_nearest, max(d.shape[1] - 1, 1))
+        if exclude_self:
+            if d.shape[1] < 2:
+                return np.zeros(0)
+            d = d.copy()
+            np.fill_diagonal(d, np.inf)
+        return np.partition(d, m - 1, axis=1)[:, :m].mean(axis=1)
+
     def _fit_scores(
         self, chunk_stack: npt.NDArray[np.float64], top: npt.NDArray[np.int64], stacks: list[npt.NDArray[np.float64]]
     ) -> npt.NDArray[np.float64]:
-        """Mean distance from each candidate to the sampled members of its top bins.
+        """Mean distance from each candidate to the sampled members of its top bins
+        (or to its `assign_nearest` nearest sampled members).
 
         Looped over bins rather than candidates: each bin appears in far fewer
         shortlists than there are candidates, so this is a handful of large
@@ -255,7 +389,8 @@ class Binner:
             rows, slots = np.where(top == bin_index)
             if rows.size == 0:
                 continue
-            d[rows, slots] = tv_cdist(chunk_stack[rows], stacks[bin_index]).mean(axis=1)
+            block = tv_cdist(chunk_stack[rows], stacks[bin_index])
+            d[rows, slots] = self._nearest_mean(block) if self.assign_nearest > 0 else block.mean(axis=1)
         return d
 
     def _keep_largest(self, bins: list[set[str]]) -> list[set[str]]:

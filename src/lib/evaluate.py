@@ -97,3 +97,69 @@ def sequence_stats(values: list[int]) -> str:
         f"p99:{np.percentile(values, 99):.0f} "
         f"max:{np.max(values)} "
     )
+
+
+def _species_totals(bins: list[set[str]], unassigned: set[str], prefix_len: int) -> Counter[str]:
+    totals: Counter[str] = Counter(u[:prefix_len] for u in unassigned)
+    for b in bins:
+        totals.update(_bin_counter(b, prefix_len))
+    return totals
+
+
+def budget_scores(
+    bins: list[set[str]], unassigned: set[str], budgets: tuple[int, ...] = (4, 8, 16, 32, 64), prefix_len: int = 2
+) -> dict[int, tuple[float, float]]:
+    """(precision, recall) when only the `budget` largest bins are reported.
+
+    Everything outside those bins counts as unbinned.  Precision credits each
+    kept bin with its plurality organism, as `grade_bins` does; recall is
+    correct contigs over *all* contigs.  With a fixed budget, fragmenting into
+    tiny pure bins no longer pays: it raises precision but starves recall.
+    Largest-first is the choice a user without labels would make.
+    """
+    ordered = sorted(bins, key=len, reverse=True)
+    total = sum(len(b) for b in bins) + len(unassigned)
+    scores = {}
+    for budget in budgets:
+        kept = ordered[:budget]
+        assigned = sum(len(b) for b in kept)
+        correct = sum(_bin_counter(b, prefix_len).most_common()[0][1] for b in kept if b)
+        precision = correct / assigned if assigned else 0.0
+        recall = correct / total if total else 0.0
+        scores[budget] = (precision, recall)
+    return scores
+
+
+def species_completeness(
+    bins: list[set[str]], unassigned: set[str], top: int = 1, prefix_len: int = 2
+) -> dict[str, float]:
+    """Per organism, the fraction of its contigs in its `top` bins that it leads.
+
+    Only bins where the organism is the plurality count, so a 50/50 bin cannot
+    make both organisms look complete.  top=1 asks how much of each organism a
+    single bin captures, which is the ideal output.
+    """
+    totals = _species_totals(bins, unassigned, prefix_len)
+    held: dict[str, list[int]] = defaultdict(list)
+    for b in bins:
+        counter = _bin_counter(b, prefix_len)
+        if counter:
+            label, count = counter.most_common()[0]
+            held[label].append(count)
+    return {s: sum(sorted(held[s], reverse=True)[:top]) / n for s, n in totals.items()}
+
+
+def bins_to_cover(bins: list[set[str]], fraction: float = 0.9) -> int:
+    """How many of the largest bins hold `fraction` of all binned contigs.
+
+    A size-distribution summary that ignores the long tail of tiny bins, where
+    a raw bin count is dominated by it.
+    """
+    sizes = sorted((len(b) for b in bins), reverse=True)
+    needed = fraction * sum(sizes)
+    held = 0
+    for count, size in enumerate(sizes, 1):
+        held += size
+        if held >= needed:
+            return count
+    return len(sizes)

@@ -1,6 +1,14 @@
 import numpy as np
+import pytest
 
-from knn.graph import auto_n_neighbors, graph_stats, knn_indices, knn_indices_from_stack, mutual_knn_edges
+from knn.graph import (
+    auto_n_neighbors,
+    graph_stats,
+    knn_indices,
+    knn_indices_from_stack,
+    merge_events,
+    mutual_knn_edges,
+)
 from lib.distances import tv_distance_matrix
 
 
@@ -109,3 +117,23 @@ def test_mutual_knn_edges_match_the_directed_lists() -> None:
     lists = [set(row) for row in idx.tolist()]
     for i, j in mutual_knn_edges(idx, mutual=True).tolist():
         assert j in lists[i] and i in lists[j]
+
+
+def test_merge_events_reports_rel_of_joined_parts() -> None:
+    # two triangles joined by one edge, merged into one community
+    edges = np.array([[0, 1], [1, 2], [0, 2], [3, 4], [4, 5], [3, 5], [2, 3]])
+    before = np.array([0, 0, 0, 1, 1, 1])
+    after = np.zeros(6, dtype=np.int64)
+    (event,) = merge_events(edges, before, after, min_part=3)
+    community, a, b, rel = event
+    assert community == 0
+    assert a.tolist() == [0, 1, 2] and b.tolist() == [3, 4, 5]
+    # 1 of 9 possible cross edges against complete triangles
+    assert rel == pytest.approx(1 / 9)
+
+
+def test_merge_events_ignores_small_parts_and_unmerged() -> None:
+    edges = np.array([[0, 1], [1, 2], [0, 2], [3, 4]])
+    before = np.array([0, 0, 0, 1, 1])
+    assert merge_events(edges, before, np.array([0, 0, 0, 0, 0]), min_part=3) == []
+    assert merge_events(edges, before, np.array([0, 0, 0, 1, 1]), min_part=2) == []

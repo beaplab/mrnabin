@@ -130,3 +130,47 @@ def graph_stats(n: int, edges: npt.NDArray[np.int64]) -> str:
         f"mean_degree:{np.mean(degree):.1f} "
         f"median_degree:{np.median(degree):.0f} "
     )
+
+
+def merge_events(
+    edges: npt.NDArray[np.int64], before: npt.NDArray[np.int64], after: npt.NDArray[np.int64], min_part: int
+) -> list[tuple[int, npt.NDArray[np.int64], npt.NDArray[np.int64], float]]:
+    """Pairs of earlier communities that a later partition put together.
+
+    Each community of `after` is split into the communities of `before` its
+    nodes came from; every pair of those parts with at least `min_part` nodes
+    each is returned as (community of `after`, nodes of part a, nodes of part b,
+    rel), where
+
+        rel = density(a, b) / sqrt(density(a) * density(b))
+
+    is the edge density between the parts relative to their own internal
+    densities.  CPM merges two parts once density(a, b) clears the resolution,
+    which says nothing about how they compare with the parts' own cohesion.
+    """
+    # a part is a (community after, community before) pair
+    key = after.astype(np.int64) * (int(before.max()) + 1) + before
+    keys, part_of, sizes = np.unique(key, return_inverse=True, return_counts=True)
+    community_of = keys // (int(before.max()) + 1)
+    big = np.flatnonzero(sizes >= min_part)
+    if big.size < 2:
+        return []
+
+    inside = after[edges[:, 0]] == after[edges[:, 1]]
+    pu, pv = part_of[edges[inside, 0]], part_of[edges[inside, 1]]
+    pair_keys, pair_counts = np.unique(np.minimum(pu, pv) * len(keys) + np.maximum(pu, pv), return_counts=True)
+    counts = dict(zip(pair_keys.tolist(), pair_counts.tolist()))
+
+    def density(a: int, b: int) -> float:
+        possible = sizes[a] * (sizes[a] - 1) / 2 if a == b else sizes[a] * sizes[b]
+        return counts.get(min(a, b) * len(keys) + max(a, b), 0) / possible
+
+    events = []
+    for community in np.unique(community_of[big]):
+        parts = big[community_of[big] == community]
+        for i, a in enumerate(parts):
+            for b in parts[i + 1 :]:
+                internal = density(a, a) * density(b, b)
+                rel = density(a, b) / math.sqrt(internal) if internal > 0 else 0.0
+                events.append((int(community), np.flatnonzero(part_of == a), np.flatnonzero(part_of == b), float(rel)))
+    return events

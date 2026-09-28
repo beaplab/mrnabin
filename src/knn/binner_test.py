@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 
 from knn.binner import Binner
@@ -178,3 +180,57 @@ def test_recluster_residual_only_adds_bins() -> None:
     assert len(with_) >= len(without)
     assigned = [l for b in with_ for l in b]
     assert len(assigned) == len(set(assigned)), "a contig landed in two bins"
+
+
+def test_nearest_mean_excludes_self() -> None:
+    binner = Binner(_mixture(n_per_org=2), assign_nearest=2)
+    d = np.array([[0.0, 1.0, 2.0], [1.0, 0.0, 4.0], [2.0, 4.0, 0.0]])
+    assert binner._nearest_mean(d, exclude_self=True).tolist() == [1.5, 2.5, 3.0]
+    # outsiders are capped at the same m as members: sample size - 1
+    binner.assign_nearest = 5
+    assert binner._nearest_mean(d[:1]).tolist() == [0.5]
+
+
+def test_assign_nearest_respects_organism_boundaries() -> None:
+    sequences = _mixture()
+    bins, _ = Binner(sequences, n_neighbors=15, assign_nearest=5, assign_sample=20).run()
+    for b in bins:
+        assert len(set(l[:2] for l in b)) == 1
+
+
+def test_sweep_with_every_merge_vetoed_keeps_the_finer_partition() -> None:
+    sequences = _mixture()
+
+    def sweep(veto: bool) -> list[set[str]]:
+        binner = Binner(
+            sequences,
+            n_neighbors=15,
+            resolution=0.5,
+            resolution_sweep=True,
+            resolution_min=0.01,
+            veto_min_part=3,
+            assign_remaining=False,
+            sweep_veto=veto,
+            veto_rel=math.inf,
+        )
+        return binner.run()[0]
+
+    free = sweep(veto=False)
+    vetoed = sweep(veto=True)
+    assert len(vetoed) >= len(free)
+    for b in vetoed:
+        assert len(set(l[:2] for l in b)) == 1
+
+
+def test_veto_both_needs_both_signals() -> None:
+    binner = Binner(_mixture(n_per_org=5), veto_rel=0.1, veto_distance=math.inf)
+    a, b = np.arange(0, 5), np.arange(5, 10)
+    labels = list(binner.sequences)
+    # either-mode: sparse alone is enough
+    assert binner._is_suspect(labels, a, b, rel=0.01)
+    binner.veto_both = True
+    # both-mode: sparse but not distant (veto_distance is inf) is let through
+    assert not binner._is_suspect(labels, a, b, rel=0.01)
+    binner.veto_distance = 0.0
+    assert binner._is_suspect(labels, a, b, rel=0.01)
+    assert not binner._is_suspect(labels, a, b, rel=0.5)

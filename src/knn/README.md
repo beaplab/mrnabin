@@ -31,7 +31,12 @@ neighbour lists a row-block at a time, so the n x n distance matrix is never
 materialised.
 
 **K.1 — partition.** Run Leiden on the unweighted graph with the `quality`
-objective at `resolution`, for `n_iterations` from `seed`.
+objective at `resolution`, for `n_iterations` from `seed`. With
+`resolution_sweep` (the default config), then lower the resolution by
+`sweep_factor` per step down to `resolution_min`, starting each step from the
+previous membership so the partition coarsens continuously instead of being
+redrawn. Optionally (`sweep_veto`) split back any merge of two sizeable parts
+that looks cross-species.
 
 **K.2 — drop small bins.** Discard bins below `min_bin_size`; a mutual-kNN graph
 strands isolated nodes that Leiden returns as singletons.
@@ -76,7 +81,7 @@ noise set, which `lib.evaluate.dump_bins` writes as `bin_none`.
 
 **Graph**
 
-* `n_neighbors = 512` — neighbours per contig. Raising it adds edges, so bins
+* `n_neighbors = 1024` — neighbours per contig. Raising it adds edges, so bins
   grow and coverage rises while purity falls. `0` selects the O(log n) rule in
   `graph.auto_n_neighbors`. It also sets a hard *floor* on the bin count:
   Leiden cannot merge across connected components, and the component count
@@ -102,13 +107,28 @@ noise set, which `lib.evaluate.dump_bins` writes as `bin_none`.
   mutual filter. See HISTORY.md for how far each mixture can be coarsened
   before its bins start spanning species.
 * `n_iterations = 2`, `seed = 0` — passed to Leiden.
-* `min_bin_size = 3` — bins smaller than this are dropped at K.2.
+* `resolution_sweep = true`, `sweep_factor = 0.7`, `resolution_min = 0.002` —
+  the warm-started sweep. The floor is fixed, not data-driven: the first
+  cross-species merge came at 0.007, 0.0017 and 0.0008 on three mixtures and
+  never on a fourth, so any fixed value is wrong for some mixture.
+* `sweep_veto = false`, `veto_min_part = 100`, `veto_rel = 0.08`,
+  `veto_distance = 1.15` — refuse a merge of two parts of at least
+  `veto_min_part` nodes if the edge density between them is below `veto_rel`
+  times their internal density, or their 4-mer distance exceeds
+  `veto_distance` times their internal distance (`veto_both = true`: only if
+  both hold). Off: every variant lost to the fixed floor.
+* `min_bin_size = 32` — bins smaller than this are dropped at K.2 and their
+  contigs reassigned at K.3.
 
 **Assignment**
 
 * `assign_remaining = true` — run K.3.
 * `assign_top_bins = 5` — how many nearest centroids to score per contig.
-* `assign_sample = 30` — members sampled per bin for `d(p, C)`, μ_C and σ_C.
+* `assign_sample = 200` — members sampled per bin for `d(p, C)`, μ_C and σ_C.
+* `assign_nearest = 5` — if > 0, `d(p, C)` is the mean distance to the m
+  nearest sampled members, and μ_C, σ_C describe each member's distance to its
+  own m nearest; a coarse bin's all-pairs distances are multi-modal. 0 uses
+  all sampled members.
 * `z_max = .inf` — admissibility gate on a fixed z. Infinite means no gate.
   Prefer `target_coverage`: z is not comparable across datasets, so the same
   `z_max` refuses very different fractions on different data.
@@ -121,14 +141,14 @@ noise set, which `lib.evaluate.dump_bins` writes as `bin_none`.
 
 **Staged assignment** (all optional; empty/false reproduces a single pass)
 
-* `length_stages = []` — length percentiles, longest tranche first, e.g.
+* `length_stages = [75, 50, 25, 0]` — length percentiles, longest tranche first, e.g.
   `[75, 50, 25, 0]`. Each stage assigns the contigs at least that long and
   recomputes every bin's envelope before the next, so bins are populated by
   reliable long contigs before short noisy ones are judged. When set, staging
   *replaces* the single pass rather than preceding it.
 * `stage_admit = 0.75` — fraction of each tranche admitted by best z; the rest
   are deferred to a later stage where the enlarged bins may judge them better.
-* `recluster_residual = false` — rebuild the graph on whatever is still
+* `recluster_residual = true` — rebuild the graph on whatever is still
   unassigned and let it form new bins. The only way a species that never reached
   `min_bin_size` in the main graph can get a bin of its own.
 * `residual_min_bin_size = 8` — floor for those new bins. Lower than
@@ -147,6 +167,52 @@ noise set, which `lib.evaluate.dump_bins` writes as `bin_none`.
 * `verbose`, `compact` — per-step logging, in DistBin's format.
 * `labeled`, `prefix_len` — grade bins against organism labels taken as the
   first `prefix_len` characters of each contig id.
+
+## KNN seeds merged by VLP
+
+`knn.vlp_merge.KNNVLPBinner` runs KNN, keeps its `vlp_seed_bins` largest bins as
+seeds, and refines and merges them with VLP trie models. It takes DBV's input (a
+list of `Sequence`) and DBV's parameters, plus KNN's.
+
+1. The 32 largest KNN bins seed one cluster each; their other contigs start
+   unbinned.
+2. Contigs are split into two fixed random folds. Each cluster gets one trie per
+   fold, and every contig is scored by the trie of the fold it is *not* in, so
+   all scores are held out.
+3. DBV's length schedule activates contigs and reassigns each to its
+   best-scoring cluster.
+4. The most absorbable cluster (its members score best elsewhere relative to at
+   home) is dissolved and its contigs reassigned, one step at a time. The merge
+   stops, undoing the last step, when held-out log-likelihood per base -- over
+   all active contigs, unassigned ones counting as background -- falls by more
+   than `vlp_tolerance`.
+
+`vlp_holdout: false` runs DBV's own phase on the seeds instead (in-sample
+scores, its weakest-cluster rule and a zero-tolerance guard).
+
+On the benchmark (after the DBV orientation fix, see HISTORY.md) the median
+mixture's 3 largest bins hold 90% of its binned contigs, and the 4 largest hold
+0.822 of all contigs correctly against DBV's 0.614 -- better on 40 of 43
+mixtures -- at 0.930 precision. It is ~8x slower than DBV (median 1258 s vs
+157 s).
+
+* `vlp_seed_bins = 32`, `vlp_holdout = true`, `vlp_tolerance = 0.002`
+
+    uv run scripts/benchmark_12417881.py knnv mytry --sets random hard
+
+## Benchmarking
+
+`scripts/benchmark_12417881.py` runs an algorithm and config over a seeded
+random sample of 30 EukProt pairs and 6 triples (`--sets hard` adds the seven
+pairs HISTORY.md was tuned on) and writes each mixture's bins under
+`runs/bench/<name>/`. `scripts/bench_summary.py` scores and compares runs:
+
+    uv run scripts/benchmark_12417881.py knn mytry --sets random hard --set resolution_min=0.001
+    uv run scripts/bench_summary.py dbv mytry
+
+The headline column is `r@16`: correct contigs in the 16 largest bins over all
+contigs. Plurality accuracy over all bins rewards fragmentation; `r@N` cannot be
+raised by it.
 
 ## Shared code
 

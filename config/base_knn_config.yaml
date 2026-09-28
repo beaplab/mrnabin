@@ -8,8 +8,10 @@ selection_percentiles_low: 45.0
 selection_percentiles_high: 95.0
 
 # Graph construction
-# n_neighbors <= 0 falls back to the O(log n) rule in knn.graph.auto_n_neighbors
-n_neighbors: 512
+# n_neighbors <= 0 falls back to the O(log n) rule in knn.graph.auto_n_neighbors.
+# 1024 rather than 512: Leiden cannot merge across components, and the sweep
+# below needs a connected enough graph to coarsen into few bins.
+n_neighbors: 1024
 mutual: true
 
 # Leiden
@@ -19,7 +21,23 @@ quality: cpm
 resolution: 0.5
 n_iterations: 2
 seed: 0
-min_bin_size: 3
+
+# Sweep resolution down from `resolution` to `resolution_min`, each step warm-
+# started from the last, so the partition coarsens continuously. 0.002 sits just
+# above the first cross-species merge seen on two of four mixtures (0.0017,
+# 0.0008) but below it on a third (0.007): a floor, not a rule. The veto that
+# refuses cross-species-looking merges is off: it fragmented species more than
+# it protected them (r@16 0.50 against 0.63).
+resolution_sweep: true
+sweep_factor: 0.7
+resolution_min: 0.002
+sweep_veto: false
+veto_min_part: 100
+veto_rel: 0.08
+veto_distance: 1.15
+
+# Bins below this are not seeds; their contigs are reassigned at K.3.
+min_bin_size: 32
 
 # Assign whatever the graph left unbinned to the bin whose own internal scale
 # it best fits. z_max .inf means no admissibility gate: gating cost ~50 points
@@ -27,7 +45,11 @@ min_bin_size: 3
 # preferentially. Set a finite z_max to trade coverage back for purity.
 assign_remaining: true
 assign_top_bins: 5
-assign_sample: 30
+# assign_nearest > 0 scores a contig by its mean distance to its m nearest
+# sampled members instead of to all of them. Measured neutral at the default
+# coarseness (r@16 0.630 vs 0.633); meant for very coarse bins.
+assign_sample: 200
+assign_nearest: 5
 
 # max_bins: keep only the N largest core bins as seeds (0 = keep all). This is
 # selection, not merging -- discarded bins' contigs are re-assigned individually.
@@ -44,19 +66,29 @@ z_max: .inf
 # first; each stage admits the best stage_admit fraction by z and recomputes
 # every bin's envelope before the next. Empty = single pass. Worth +0.060 on
 # mixtures whose organisms differ systematically in contig length, ~0 otherwise.
-length_stages: []
+length_stages: [75, 50, 25, 0]
 stage_admit: 0.75
 
 # Let whatever is still unassigned form its own bins. The only way a species the
 # seeding missed can get one: recovered 5-8% per mixture at 0.72-0.96 purity
 # across eight pairs, and never hurt.
-recluster_residual: false
+recluster_residual: true
 residual_min_bin_size: 8
 
 # Blocked routines: bounds peak memory, does not change the result
 block_size: 512
 # Verbose pairwise-distance stats need a dense n x n matrix; skip above this
 stats_max_nodes: 6000
+
+# KNNVLPBinner only (knn.vlp_merge). The largest vlp_seed_bins KNN bins seed VLP;
+# clusters are then dissolved one at a time, scored held out (each contig by the
+# trie of the fold it is not in), until held-out fit per base over all contigs
+# falls by more than vlp_tolerance. The tolerance's good range was 0.002-0.003
+# on both halves of the merge-path analysis. vlp_holdout: false runs DBV's own
+# in-sample phase instead.
+vlp_seed_bins: 32
+vlp_holdout: true
+vlp_tolerance: 0.002
 
 verbose: false
 labeled: false
