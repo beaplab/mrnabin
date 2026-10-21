@@ -4,11 +4,11 @@ Variable Length Pattern clustering for mRNA contigs.
 
 ## Getting Started
 
-`uv run scripts/sample_labeled_vlp_run.py`
+`uv run scripts/run_binner.py vlp sample`
 
 To run on your own data:
 
-`uv run scripts/run_vlp.py contig_filepath peptide_filepath output_filepath`
+`uv run scripts/run_binner.py vlp file contig_filepath peptide_filepath output_filepath`
 
 ## Algorithm Description
 

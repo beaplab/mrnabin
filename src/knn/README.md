@@ -6,11 +6,11 @@ assigned to the bin whose own internal scale they best fit.
 
 ## Getting Started
 
-`uv run scripts/run_knn.py contig_file peptide_file output_file`
+`uv run scripts/run_binner.py knn file contig_file peptide_file output_file`
 
 On a labelled EukProt pair:
 
-`uv run scripts/run_12417881_knn.py EP00178 EP00657 --verbose`
+`uv run scripts/run_binner.py knn 12417881 EP00178 EP00657 --verbose`
 
 Organisms may be given as an EukProt id, a filename fragment, or an index into
 the sorted organism list.

@@ -5,7 +5,7 @@ and VLP trie models merge them down to a handful per mixture.
 
 ## Getting Started
 
-`uv run scripts/run_klv.py contig_file peptide_file output_file`
+`uv run scripts/run_binner.py klv file contig_file peptide_file output_file`
 
 The output is the usual TSV of contig id and bin label (`bin_none` for
 unbinned). In code, `KLVBinner` follows DBV's contract: set

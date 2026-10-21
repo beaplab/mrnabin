@@ -16,21 +16,21 @@ Mr. Nabin uses [uv](https://docs.astral.sh/uv) as the project manager.
 
 The general use-case is for binning mRNA contigs coming from an unknown collection of species.
 
-`uv run scripts/run_{ALGO}.py contig_filepath peptide_filepath output_filepath`
+`uv run scripts/run_binner.py {ALGO} file contig_filepath peptide_filepath output_filepath`
 
 The peptide file is used to correctly orient the contigs.
 The output file is a TSV with two columns: contig ID and bin label (`bin_0001`, `bin_0002`, …, or `bin_none` for unbinned contigs).
 In the current version, contigs without corresponding orientation information will be skipped.
 
-Run: `uv run scripts/run_distbin.py sample_data/aa_bb_contigs.fasta sample_data/aa_bb_peptides.fasta sample_output.tsv`
+Run: `uv run scripts/run_binner.py distbin file sample_data/aa_bb_contigs.fasta sample_data/aa_bb_peptides.fasta sample_output.tsv`
 to see a small example run.
 
 The other use-case is to mix together mRNA contigs coming from several different species,
 and see if any of the algorithms can effectively separate them.
 
-Run: `uv run scripts/sample_labeled_distbin_run.py` to see a small example run.
+Run: `uv run scripts/run_binner.py distbin sample` to see a small example run.
 
-Running in labeled mode is a bit brittle. Use the included scripts to help guide you.
+`scripts/run_binner.py` also runs every algorithm on the evaluation datasets: `a14`, and the two-organism mixtures `sample`, `5686984` and `12417881`, which sweep every pair (optionally with `--parallel`) or run one chosen pair. See its docstring for details.
 
 ## Algorithms
 
