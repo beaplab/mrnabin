@@ -1,6 +1,7 @@
 """Tests for dbv scoring utilities."""
 
 import numpy as np
+import pytest
 
 from lib.encoded_sequences import Sequence, encode_seq, reverse_complement
 
@@ -62,23 +63,25 @@ class TestWeakestCluster:
     def _two_cluster_seqs(self) -> list[Sequence]:
         return [_make_seq("A" * 100, cluster=0) for _ in range(3)] + [_make_seq("C" * 100, cluster=1) for _ in range(3)]
 
-    def test_returns_minus_one_when_healthy(self) -> None:
-        sequences = self._two_cluster_seqs()
+    @pytest.mark.parametrize(
+        "row0, row1, expected",
+        [
+            # healthy: each cluster's members score well only at home
+            ([100.0, 100.0, 100.0, -50.0, -50.0, -50.0], [-50.0, -50.0, -50.0, 100.0, 100.0, 100.0], -1),
+            # bad model: cluster 0's per-base mean (0.1/100) is below 0.01, so argmin(mean_norm)
+            ([0.1, 0.1, 0.1, -100.0, -100.0, -100.0], [-100.0, -100.0, -100.0, 100.0, 100.0, 100.0], 0),
+            # absorbable: cluster 1's members fit cluster 0's model nearly as well as their own
+            ([100.0, 100.0, 100.0, 95.0, 95.0, 95.0], [10.0, 10.0, 10.0, 100.0, 100.0, 100.0], 1),
+        ],
+    )
+    def test_picks_weakest(self, row0: list[float], row1: list[float], expected: int) -> None:
         scores = [ClusterScore(6), ClusterScore(6)]
-        scores[0].scores[:] = [100.0, 100.0, 100.0, -50.0, -50.0, -50.0]
-        scores[1].scores[:] = [-50.0, -50.0, -50.0, 100.0, 100.0, 100.0]
-        result = weakest_cluster(scores, sequences, absorb_thresh=0.5, cv_outlier_ratio=1.25, verbose=False)
-        assert result == -1
-
-    def test_picks_bad_model_via_mean_norm(self) -> None:
-        """When per-base mean falls below 0.01, picks argmin(mean_norm_scores)."""
-        sequences = self._two_cluster_seqs()
-        scores = [ClusterScore(6), ClusterScore(6)]
-        # cluster 0 has near-zero per-base avg (0.1/100 = 0.001); cluster 1 is healthy
-        scores[0].scores[:] = [0.1, 0.1, 0.1, -100.0, -100.0, -100.0]
-        scores[1].scores[:] = [-100.0, -100.0, -100.0, 100.0, 100.0, 100.0]
-        result = weakest_cluster(scores, sequences, absorb_thresh=0.5, cv_outlier_ratio=1.25, verbose=False)
-        assert result == 0
+        scores[0].scores[:] = row0
+        scores[1].scores[:] = row1
+        result = weakest_cluster(
+            scores, self._two_cluster_seqs(), absorb_thresh=0.5, cv_outlier_ratio=1.25, verbose=False
+        )
+        assert result == expected
 
     def test_keeps_last_cluster_despite_bad_model(self) -> None:
         """With only one live cluster, never cull it — degrade to 1 bin, not 0."""
@@ -92,29 +95,18 @@ class TestWeakestCluster:
         result = weakest_cluster(scores, sequences, absorb_thresh=0.5, cv_outlier_ratio=1.25, verbose=False)
         assert result == -1
 
-    def test_picks_absorbable_cluster(self) -> None:
-        """When max absorbability exceeds threshold, picks argmax(absorbability)."""
-        sequences = self._two_cluster_seqs()
-        scores = [ClusterScore(6), ClusterScore(6)]
-        # cluster 1's members fit cluster 0's model nearly as well as their own
-        scores[0].scores[:] = [100.0, 100.0, 100.0, 95.0, 95.0, 95.0]
-        scores[1].scores[:] = [10.0, 10.0, 10.0, 100.0, 100.0, 100.0]
-        result = weakest_cluster(scores, sequences, absorb_thresh=0.5, cv_outlier_ratio=1.25, verbose=False)
-        assert result == 1
 
-
-class TestRelativeMaxPct:
-    def test_empty_returns_zero(self) -> None:
-        assert _relative_max_pct([]) == 0.0
-
-    def test_singleton_returns_zero(self) -> None:
-        assert _relative_max_pct([5.0]) == 0.0
-
-    def test_second_max_zero_returns_zero(self) -> None:
-        assert _relative_max_pct([5.0, 0.0]) == 0.0
-
-    def test_ratio(self) -> None:
-        assert _relative_max_pct([10.0, 2.0, 1.0]) == 5.0
+@pytest.mark.parametrize(
+    "values, expected",
+    [
+        ([], 0.0),
+        ([5.0], 0.0),
+        ([5.0, 0.0], 0.0),  # second max zero
+        ([10.0, 2.0, 1.0], 5.0),
+    ],
+)
+def test_relative_max_pct(values: list[float], expected: float) -> None:
+    assert _relative_max_pct(values) == expected
 
 
 class TestScoresOrientedStrand:

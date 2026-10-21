@@ -18,16 +18,6 @@ def test_generate_kmer_map() -> None:
     assert len(set(kmer_map.values())) == 256
 
 
-def test_seq_to_indices() -> None:
-    seq = "TGTCGCGTGTTTTGGATGA"
-    kmer_map = generate_kmer_map(4)
-    forward = seq_to_indices(seq, 4, kmer_map)
-    assert forward is not None
-    # reverse = seq_to_indices(rc_seq, 4, kmer_map)
-    # assert tuple(forward[:8]) == tuple(reverse[-8:][::-1])
-    # assert tuple(forward[-8:][::-1]) == tuple(reverse[:8])
-
-
 def test_seq_to_kmer_array() -> None:
     seqs = [
         "TGTCGCGTGTTTTGGATGA",

@@ -1,5 +1,7 @@
+from lib.encoded_sequences import Sequence, encode_seq
 from lib.evaluate import (
     all_pure,
+    bins_by_id,
     bins_to_cover,
     budget_scores,
     dump_bins,
@@ -60,3 +62,12 @@ def test_bins_to_cover() -> None:
     assert bins_to_cover(bins, 0.9) == 1
     assert bins_to_cover(bins, 0.95) == 2
     assert bins_to_cover([], 0.9) == 0
+
+
+def test_bins_by_id_groups_active_clusters() -> None:
+    """Bins in cluster order; cluster -1 and inactive sequences are unbinned."""
+    sequences = [
+        Sequence(seq_id=i, seq=encode_seq("ACGT"), cluster=c, active=a)
+        for i, c, a in [("a", 0, True), ("b", 0, True), ("c", 1, True), ("d", -1, True), ("e", 0, False)]
+    ]
+    assert bins_by_id(sequences) == ([{"a", "b"}, {"c"}], {"d", "e"})

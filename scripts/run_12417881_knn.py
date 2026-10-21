@@ -4,7 +4,7 @@
 can be tried without waiting for 7000 mixtures.
 
     uv run scripts/run_12417881_knn.py EP00178 EP00657 --verbose
-    uv run scripts/run_12417881_knn.py 11 35 --verbose --resolution 0.02
+    uv run scripts/run_12417881_knn.py 11 35 --verbose --resolution_min 0.02
 
 Organisms may be given as an EukProt id, any unique part of a filename, or an
 index into the sorted organism list (the numbering used by the sweep scripts).

@@ -1,6 +1,8 @@
 from lib.selection import select_by_length_percentile, selection_report
 
-SEQUENCES = {f"s{i:02d}": "A" * (100 * (i + 1)) for i in range(100)}
+# keys s00..s99 with s{i} of length 100 * (i + 1), inserted out of length order
+# so that a missing sort would show
+SEQUENCES = {f"s{i:02d}": "A" * (100 * (i + 1)) for i in (*range(1, 100, 2), *range(0, 100, 2))}
 
 
 def test_select_by_length_percentile_takes_the_band() -> None:

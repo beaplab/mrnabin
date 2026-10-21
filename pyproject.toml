@@ -18,7 +18,7 @@ dependencies = [
 # distbin = "distbin:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/distbin", "src/vlp", "src/lib", "src/knn"]
+packages = ["src/distbin", "src/vlp", "src/lib", "src/knn", "src/klv"]
 
 [build-system]
 requires = ["hatchling"]

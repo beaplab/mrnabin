@@ -1,8 +1,9 @@
-import math
+from typing import Any
 
 import numpy as np
+import pytest
 
-from knn.binner import Binner
+from knn.binner import Binner, _nearest_mean
 
 
 def _mixture(n_per_org: int = 40, length: int = 4000, seed: int = 0) -> dict[str, str]:
@@ -16,221 +17,73 @@ def _mixture(n_per_org: int = 40, length: int = 4000, seed: int = 0) -> dict[str
     return sequences
 
 
-def test_run_separates_two_compositions() -> None:
-    binner = Binner(
-        _mixture(),
-        selection_percentiles_low=0.0,
-        selection_percentiles_high=100.0,
-        n_neighbors=15,
-        min_bin_size=3,
-    )
-    bins, unbinned = binner.run()
-    assert bins
-    for b in bins:
-        prefixes = set(l[:2] for l in b)
-        assert len(prefixes) == 1, f"bin mixed organisms: {prefixes}"
-    assert len(unbinned) < 0.5 * len(binner.sequences)
-
-
-def test_n_neighbors_near_n_merges_everything() -> None:
-    """k saturates at n - 1, the graph goes complete, and the organisms merge.
-
-    The default n_neighbors is sized for tens of thousands of contigs, so it
-    degenerates on small inputs.  Pinned so the failure mode stays visible.
-    """
-    sequences = _mixture(n_per_org=20)
-    bins, _ = Binner(
-        sequences,
-        selection_percentiles_low=0.0,
-        selection_percentiles_high=100.0,
-        n_neighbors=len(sequences),
-        min_bin_size=3,
-    ).run()
-    assert any(len(set(l[:2] for l in b)) == 2 for b in bins)
-
-
-def test_graph_only_leaves_everything_else_unbinned() -> None:
-    sequences = _mixture()
-    binner = Binner(sequences, selection_percentiles_low=85.0, selection_percentiles_high=95.0)
-    bins, unbinned = binner.run()
-    binned = set().union(*bins) if bins else set()
-    assert binned | unbinned == set(sequences)
-    assert not binned & unbinned
-
-
-def test_every_sequence_is_binned_or_unbinned_exactly_once() -> None:
-    sequences = _mixture(n_per_org=25)
-    bins, unbinned = Binner(
-        sequences, selection_percentiles_low=0.0, selection_percentiles_high=100.0, assign_remaining=True
-    ).run()
-    assigned = [l for b in bins for l in b]
-    assert len(assigned) == len(set(assigned))
-    assert set(assigned) | unbinned == set(sequences)
-    assert not set(assigned) & unbinned
-
-
-def test_rejects_unknown_quality() -> None:
-    try:
-        Binner(_mixture(n_per_org=5), quality="louvain")
-    except ValueError as e:
-        assert "quality" in str(e)
-    else:
-        raise AssertionError("expected ValueError for unknown quality")
-
-
-def test_auto_n_neighbors_path_runs() -> None:
-    sequences = _mixture(n_per_org=25)
-    bins, _ = Binner(sequences, n_neighbors=0, selection_percentiles_low=0.0, selection_percentiles_high=100.0).run()
-    assert bins
-
-
-def _seeded(sequences: dict[str, str], **overrides: object) -> Binner:
-    """Binner sized for the small synthetic mixtures in this file."""
-    settings: dict[str, object] = {
+def _run(sequences: dict[str, str], **overrides: Any) -> tuple[list[set[str]], set[str]]:
+    """Run a Binner sized for these small mixtures, checking every contig is accounted for once."""
+    settings: dict[str, Any] = {
         "selection_percentiles_low": 0.0,
-        "selection_percentiles_high": 60.0,
+        "selection_percentiles_high": 100.0,
         "n_neighbors": 15,
         "min_bin_size": 3,
     }
-    settings.update(overrides)
-    return Binner(sequences, **settings)  # type: ignore[arg-type]
-
-
-def test_assign_remaining_increases_coverage() -> None:
-    sequences = _mixture(n_per_org=30)
-    _, without = _seeded(sequences, assign_remaining=False).run()
-    _, with_ = _seeded(sequences, assign_remaining=True).run()
-    assert len(with_) < len(without)
-
-
-def test_tighter_z_max_assigns_fewer() -> None:
-    sequences = _mixture(n_per_org=30)
-    loose = len(_seeded(sequences, assign_remaining=True, z_max=10.0).run()[1])
-    tight = len(_seeded(sequences, assign_remaining=True, z_max=-1.0).run()[1])
-    assert tight > loose
-
-
-def test_assignment_respects_organism_boundaries() -> None:
-    sequences = _mixture(n_per_org=30)
-    bins, _ = _seeded(sequences, assign_remaining=True).run()
-    for b in bins:
-        assert len(set(l[:2] for l in b)) == 1, "assignment mixed organisms"
-
-
-def test_dropped_small_bins_are_not_double_counted() -> None:
-    """K.2 drops bins, K.3 may re-assign their contigs; the two must agree.
-
-    The earlier `unbinned |= small` put such a contig in a bin *and* in the
-    unbinned set, inflating both totals past the number of input sequences.
-    """
-    sequences = _mixture(n_per_org=30)
-    bins, unbinned = _seeded(sequences, assign_remaining=True, min_bin_size=6).run()
+    bins, unbinned = Binner(sequences, **(settings | overrides)).run()
     assigned = [l for b in bins for l in b]
     assert len(assigned) == len(set(assigned)), "a contig landed in two bins"
     assert not set(assigned) & unbinned, "a contig is both binned and unbinned"
-    assert len(assigned) + len(unbinned) == len(sequences)
+    assert set(assigned) | unbinned == set(sequences)
+    return bins, unbinned
+
+
+def _mixed(bins: list[set[str]]) -> list[set[str]]:
+    return [b for b in bins if len(set(l[:2] for l in b)) > 1]
+
+
+@pytest.mark.parametrize("high", [100.0, 60.0])
+def test_separates_two_compositions(high: float) -> None:
+    """Pure bins whether the graph sees every contig or K.3 assigns 40% of them."""
+    sequences = _mixture()
+    bins, unbinned = _run(sequences, selection_percentiles_high=high)
+    assert bins and not _mixed(bins)
+    assert len(unbinned) < 0.5 * len(sequences)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # narrow band: most contigs reach a bin only through K.3
+        {"selection_percentiles_low": 85.0, "selection_percentiles_high": 95.0},
+        # K.2 drops bins and K.3 re-assigns their contigs; once a contig was
+        # counted both binned and unbinned
+        {"selection_percentiles_high": 60.0, "min_bin_size": 6},
+    ],
+)
+def test_every_contig_is_accounted_for_once(overrides: dict[str, Any]) -> None:
+    _run(_mixture(n_per_org=30), **overrides)
 
 
 def test_max_bins_keeps_the_largest_and_reassigns_the_rest() -> None:
     """Selection, not merging: discarded seeds' contigs still get binned."""
     sequences = _mixture(n_per_org=30)
-    bins, unbinned = _seeded(sequences, assign_remaining=True, max_bins=2).run()
+    bins, unbinned = _run(sequences, selection_percentiles_high=60.0, max_bins=2)
     assert len(bins) <= 2
-    assigned = [l for b in bins for l in b]
-    assert len(assigned) == len(set(assigned))
-    assert set(assigned) | unbinned == set(sequences)
+    assert len(unbinned) < 0.5 * len(sequences)
 
 
-def test_target_coverage_binds() -> None:
-    sequences = _mixture(n_per_org=30)
-    bins, _ = _seeded(sequences, assign_remaining=True, target_coverage=0.6).run()
-    covered = sum(len(b) for b in bins) / len(sequences)
-    assert 0.5 <= covered <= 0.7, covered
+def test_neighbor_cap_prevents_a_complete_graph() -> None:
+    """With k = n the graph goes complete and the organisms merge; the default cap prevents it."""
+    sequences = _mixture(n_per_org=20)
+    uncapped, _ = _run(sequences, n_neighbors=len(sequences), neighbor_cap=0)
+    capped, _ = _run(sequences, n_neighbors=len(sequences))
+    assert _mixed(uncapped)
+    assert capped and not _mixed(capped)
 
 
-def test_target_coverage_takes_priority_over_z_max() -> None:
-    """A coverage target is a quantile of z, so a fixed z_max must not also fire."""
-    sequences = _mixture(n_per_org=30)
-    bins, _ = _seeded(sequences, assign_remaining=True, target_coverage=0.8, z_max=0.0).run()
-    covered = sum(len(b) for b in bins) / len(sequences)
-    assert covered > 0.7, covered
-
-
-def test_length_stages_assign_everything() -> None:
-    sequences = _mixture(n_per_org=30)
-    bins, unbinned = _seeded(sequences, assign_remaining=True, length_stages=(50.0, 0.0)).run()
-    assigned = [l for b in bins for l in b]
-    assert len(assigned) == len(set(assigned))
-    assert set(assigned) | unbinned == set(sequences)
-
-
-def test_length_stages_do_not_lose_contigs() -> None:
-    """Deferred contigs must reach a later stage, not vanish."""
-    sequences = _mixture(n_per_org=40)
-    staged, staged_unb = _seeded(sequences, assign_remaining=True, length_stages=(75.0, 50.0, 25.0, 0.0)).run()
-    single, single_unb = _seeded(sequences, assign_remaining=True).run()
-    assert sum(len(b) for b in staged) + len(staged_unb) == len(sequences)
-    assert sum(len(b) for b in single) + len(single_unb) == len(sequences)
-
-
-def test_recluster_residual_only_adds_bins() -> None:
-    sequences = _mixture(n_per_org=40)
-    without, _ = _seeded(sequences, assign_remaining=True, target_coverage=0.6).run()
-    with_, _ = _seeded(sequences, assign_remaining=True, target_coverage=0.6, recluster_residual=True).run()
-    assert len(with_) >= len(without)
-    assigned = [l for b in with_ for l in b]
-    assert len(assigned) == len(set(assigned)), "a contig landed in two bins"
+def test_rejects_non_positive_n_neighbors() -> None:
+    with pytest.raises(ValueError, match="n_neighbors"):
+        Binner(_mixture(n_per_org=5), n_neighbors=0)
 
 
 def test_nearest_mean_excludes_self() -> None:
-    binner = Binner(_mixture(n_per_org=2), assign_nearest=2)
     d = np.array([[0.0, 1.0, 2.0], [1.0, 0.0, 4.0], [2.0, 4.0, 0.0]])
-    assert binner._nearest_mean(d, exclude_self=True).tolist() == [1.5, 2.5, 3.0]
+    assert _nearest_mean(d, 2, exclude_self=True).tolist() == [1.5, 2.5, 3.0]
     # outsiders are capped at the same m as members: sample size - 1
-    binner.assign_nearest = 5
-    assert binner._nearest_mean(d[:1]).tolist() == [0.5]
-
-
-def test_assign_nearest_respects_organism_boundaries() -> None:
-    sequences = _mixture()
-    bins, _ = Binner(sequences, n_neighbors=15, assign_nearest=5, assign_sample=20).run()
-    for b in bins:
-        assert len(set(l[:2] for l in b)) == 1
-
-
-def test_sweep_with_every_merge_vetoed_keeps_the_finer_partition() -> None:
-    sequences = _mixture()
-
-    def sweep(veto: bool) -> list[set[str]]:
-        binner = Binner(
-            sequences,
-            n_neighbors=15,
-            resolution=0.5,
-            resolution_sweep=True,
-            resolution_min=0.01,
-            veto_min_part=3,
-            assign_remaining=False,
-            sweep_veto=veto,
-            veto_rel=math.inf,
-        )
-        return binner.run()[0]
-
-    free = sweep(veto=False)
-    vetoed = sweep(veto=True)
-    assert len(vetoed) >= len(free)
-    for b in vetoed:
-        assert len(set(l[:2] for l in b)) == 1
-
-
-def test_veto_both_needs_both_signals() -> None:
-    binner = Binner(_mixture(n_per_org=5), veto_rel=0.1, veto_distance=math.inf)
-    a, b = np.arange(0, 5), np.arange(5, 10)
-    labels = list(binner.sequences)
-    # either-mode: sparse alone is enough
-    assert binner._is_suspect(labels, a, b, rel=0.01)
-    binner.veto_both = True
-    # both-mode: sparse but not distant (veto_distance is inf) is let through
-    assert not binner._is_suspect(labels, a, b, rel=0.01)
-    binner.veto_distance = 0.0
-    assert binner._is_suspect(labels, a, b, rel=0.01)
-    assert not binner._is_suspect(labels, a, b, rel=0.5)
+    assert _nearest_mean(d[:1], 5).tolist() == [0.5]

@@ -1,4 +1,4 @@
-PHONY: back isort format black_check isort_check format_check mypy flake8 lint test install install_dev
+PHONY: black isort format black_check isort_check format_check mypy flake8 lint test install install_dev
 
 TARGETS=src scripts
 VENV_NAME = .venv
@@ -38,7 +38,7 @@ install:
 	uv sync
 
 install_dev:
-	uv sync --extra dev
+	uv sync --group dev
 
 clean:
 	rm uv.lock \
