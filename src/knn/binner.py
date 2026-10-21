@@ -8,6 +8,7 @@ K.3 assign the remaining contigs to the bin whose own scale they best fit, in
 K.4 recluster whatever is still unassigned into new bins
 """
 
+import math
 import time
 
 import igraph as ig
@@ -74,6 +75,9 @@ class Binner:
     ):
         if n_neighbors < 1:
             raise ValueError(f"n_neighbors must be >= 1, got {n_neighbors}")
+        # the sweep only terminates against a positive floor
+        if not 0 < resolution_min < math.inf:
+            raise ValueError(f"resolution_min must be positive and finite, got {resolution_min}")
         self.k = k
         self.sequences = sequences
         self.kmer_distributions = kmer_distributions(sequences, k)
@@ -99,10 +103,13 @@ class Binner:
         all_labels = list(self.sequences.keys())
         selection = self._select_labels()
 
-        edges = self._build_graph(selection)
-        bins = self._partition(selection, edges)
-        bins, _ = self._drop_small_bins(bins)
-        bins = self._keep_largest(bins)
+        bins: list[set[str]] = []
+        # an empty length band leaves no graph; K.4 can still bin the rest
+        if selection:
+            edges = self._build_graph(selection)
+            bins = self._partition(selection, edges)
+            bins, _ = self._drop_small_bins(bins)
+            bins = self._keep_largest(bins)
         # staging sees every label, so contigs from bins dropped at K.2 get a
         # second chance; the contigs it declines are what K.4 works on
         bins = self._assign_staged(all_labels, bins)

@@ -161,6 +161,7 @@ class KLVBinner(DBVBinner):
 
         Stops without doing anything if no cluster survived to this point, which
         happens when every seed is too small to split into two modelled folds.
+        A dissolve that leaves no modellable cluster is undone.
         """
         previous: list[int] | None = None
         previous_ll = -np.inf
@@ -169,6 +170,9 @@ class KLVBinner(DBVBinner):
             reassign(self.sequences, scores)
             stats = assignment_stats(self.sequences, scores, states)
             if stats["n_live"] == 0:
+                if previous is not None:
+                    for s, cluster in zip(self.sequences, previous):
+                        s.cluster = cluster
                 return
             if previous is not None and stats["ll_all"] < previous_ll - self.vlp_tolerance:
                 for s, cluster in zip(self.sequences, previous):

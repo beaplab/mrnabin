@@ -2,7 +2,10 @@ import math
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
+import pytest
 
+import klv.binner
 from klv.binner import KLVBinner, score_matrix
 from knn.binner_test import _mixture
 from lib.encoded_sequences import Sequence, encode_seq
@@ -76,3 +79,30 @@ def test_no_surviving_seed_leaves_everything_unbinned() -> None:
     binner.run()
     bins, unbinned = bins_by_id(binner.sequences)
     assert bins == [] and len(unbinned) == len(binner.sequences)
+
+
+def test_merge_that_leaves_no_cluster_is_undone(monkeypatch: pytest.MonkeyPatch) -> None:
+    sequences = _sequences(n_per_org=3)
+    for i, s in enumerate(sequences):
+        s.cluster, s.active = i // 3, True
+    before = [s.cluster for s in sequences]
+    calls = 0
+
+    def fake_scores(seqs: list[Sequence], n_clusters: int, folds: Any) -> tuple[npt.NDArray[np.float64], list[int]]:
+        # first call: two live clusters; after the dissolve, every cluster is
+        # too small to model, as score_matrix would report it
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            for s in seqs:
+                s.cluster = -1
+            return np.full((n_clusters, len(seqs)), -np.inf), [0] * n_clusters
+        scores = np.array([[1.0 if c == k else 0.5 for c in before] for k in range(n_clusters)])
+        return scores, [1] * n_clusters
+
+    monkeypatch.setattr(klv.binner, "score_matrix", fake_scores)
+    binner = _binner()
+    binner.sequences = sequences
+    binner._merge(2, np.zeros(len(sequences), dtype=np.int8))
+    assert calls == 2
+    assert [s.cluster for s in sequences] == before

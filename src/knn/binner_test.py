@@ -77,9 +77,19 @@ def test_neighbor_cap_prevents_a_complete_graph() -> None:
     assert capped and not _mixed(capped)
 
 
-def test_rejects_non_positive_n_neighbors() -> None:
-    with pytest.raises(ValueError, match="n_neighbors"):
-        Binner(_mixture(n_per_org=5), n_neighbors=0)
+@pytest.mark.parametrize(
+    "param, value", [("n_neighbors", 0), ("resolution_min", 0.0), ("resolution_min", -1.0), ("resolution_min", np.inf)]
+)
+def test_rejects_bad_params(param: str, value: Any) -> None:
+    # a resolution floor of 0 or below never stops the sweep
+    with pytest.raises(ValueError, match=param):
+        Binner(_mixture(n_per_org=5), **{param: value})
+
+
+@pytest.mark.parametrize("n", [0, 1, 2])
+def test_empty_length_band_leaves_everything_unbinned(n: int) -> None:
+    sequences = dict(list(_mixture(n_per_org=1).items())[:n])
+    assert _run(sequences, selection_percentiles_low=99.0, selection_percentiles_high=99.5) == ([], set(sequences))
 
 
 def test_nearest_mean_excludes_self() -> None:
