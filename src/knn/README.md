@@ -2,7 +2,7 @@
 
 Graph clustering of mRNA contigs: a mutual k-nearest-neighbour graph over the
 4-mer distributions, partitioned with Leiden, and remaining contigs
-assigned to the bin whose own internal scale it best fits.
+assigned to the bin whose own internal scale they best fit.
 
 ## Getting Started
 
@@ -38,16 +38,22 @@ the partition coarsens continuously instead of being redrawn.
 `max_bins` largest bins. Discarded bins' contigs return to the
 candidate pool rather than being dropped.
 
-3. For each contig not in a bin, find the 5 nearest bin centroids, and
-score each bin C by `z_C = (d(p, C) − μ_C) / σ_C`, where `d(p, C)` is
-the mean distance from the contig to its 5 nearest of 200 sampled
-members of C, and μ_C and σ_C are the mean and standard deviation of
-the same statistic for C's own members. The contig joins `argmin z` —
-the bin whose internal scale it fits best. Dividing by σ_C is what
-makes a tight small bin and a loose large one comparable.
+3. Assign the unbinned contigs in length tranches, longest first (p75,
+p50, p25, then all). Score contig p against bin C by
+`z_C = (d(p, C) − μ_C) / σ_C`, where `d(p, C)` is p's mean distance to
+its 5 nearest members of C, and μ_C, σ_C are the mean and standard
+deviation of that statistic among C's own members. Dividing by σ_C
+makes a tight small bin and a loose large one comparable. Each tranche
+admits its best 75% by z, each to the bin it fits best; the rest wait
+for the next. Bin statistics are recomputed between tranches, so bins
+absorb long contigs before judging short ones.
 
-4. Any leftover contigs are run through the graph again and may form
-their own bins (of at least 8).
+4. If at least 200 contigs are still unbinned, build a mutual kNN graph
+over them with the main graph's `n_neighbors` (after the cap), run a
+single Leiden pass at resolution 0.5 with no sweep, and keep the
+communities of at least 8 as new bins. This is the only way an
+organism the seeds missed can get a bin. Whatever is still left is
+returned in `unbinned`.
 
 ## Parameters
 

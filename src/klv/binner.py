@@ -1,4 +1,4 @@
-"""KNN bins refined and merged by VLP trie models.
+"""KLV: KNN + Leiden bins refined and merged by VLP trie models.
 
 KNN seeds VLP with its `vlp_seed_bins` largest bins; the rest of their contigs
 start unbinned.  DBV's length schedule then activates and reassigns contigs,
@@ -6,26 +6,11 @@ and clusters are merged by dissolving one at a time into the others.
 
 Two ways to run the merge phase:
 
-`vlp_holdout` (default).  Every cluster gets one trie per fold of a fixed random
-split of the contigs, and each contig is scored by the trie of the fold it is
-not in, so every score is out-of-sample.  Each step dissolves the most
-absorbable cluster -- the one whose members score best elsewhere relative to at
-home -- and reassigns its contigs.  The merge stops, undoing the last step, when
-the held-out log-likelihood per base, over all active contigs with unassigned
-ones counting as background, falls by more than `vlp_tolerance`.
-
-Otherwise, DBV's own phase runs unchanged: in-sample scores, its
-weakest-cluster choice, and a zero-tolerance likelihood guard.
-
-Measured on merge paths recorded with scripts/merge_path_12417881.py (43
-mixtures, rule tuned on one half and scored on the other): the held-out guard at
-0.002 put 0.81-0.84 of contigs correctly in the 4 largest bins at 0.92-0.94
-precision, against 0.61 for the DBV-style merge and 0.61 for DBV.  In-sample,
-per-base log-likelihood wobbles by ~0.001 between harmless steps, which is why
-the zero-tolerance guard stopped early; held out, a contig no longer scores well
-in a cluster just because it trained that cluster's model.  Averaging over
-assigned contigs only was worse: a species whose last cluster is dissolved
-leaves the average instead of lowering it, so the guard never sees the loss.
+`vlp_holdout` (default): each cluster gets one trie per fold of a random split,
+and each contig is scored by the other fold's trie.  Each step dissolves the
+most absorbable cluster; the merge stops, undoing the last step, when held-out
+log-likelihood per base over all active contigs falls by more than
+`vlp_tolerance`.  Otherwise, DBV's own in-sample merge phase runs unchanged.
 """
 
 from typing import Any
@@ -48,12 +33,8 @@ def score_matrix(
 ) -> tuple[npt.NDArray[np.float64], list[int]]:
     """Every active contig's score under every live cluster's trie, and trie sizes.
 
-    With `folds` (0 or 1 per contig), each cluster gets one trie per fold, each
-    trained on that fold's members only, and every contig is scored by the trie
-    of the *other* fold: all scores are out-of-sample.  Scoring stays one call
-    per (contig, cluster), and two half-size tries cost about one full one.
-
-    Clusters too small to model are dissolved in place (members set to -1).
+    With `folds` (0 or 1 per contig), each contig is scored by the trie trained
+    on the other fold.  Clusters too small to model are dissolved (members -> -1).
     """
     scores = np.full((n_clusters, len(sequences)), -np.inf)
     states = [0] * n_clusters
@@ -79,6 +60,11 @@ def score_matrix(
 
 def reassign(sequences: list[Sequence], scores: npt.NDArray[np.float64]) -> None:
     """Each active contig to its best-scoring cluster, or -1 if none beats background."""
+    if scores.shape[0] == 0:
+        for s in sequences:
+            if s.active:
+                s.cluster = -1
+        return
     best = np.argmax(scores, axis=0)
     best_val = scores[best, np.arange(scores.shape[1])]
     for i, s in enumerate(sequences):
@@ -129,7 +115,7 @@ def dissolve(sequences: list[Sequence], scores: npt.NDArray[np.float64], victim:
     reassign(sequences, scores)
 
 
-class KNNVLPBinner(DBVBinner):
+class KLVBinner(DBVBinner):
     def __init__(
         self,
         vlp_seed_bins: int = 32,
