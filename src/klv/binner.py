@@ -28,19 +28,33 @@ from vlp.vlp_trie import VLPTrie
 MIN_CLUSTER = 3
 
 
+# per cluster: the members its tries were trained on, its score row, its trie sizes
+RowCache = dict[int, tuple[list[int], npt.NDArray[np.float64], int]]
+
+
 def score_matrix(
-    sequences: list[Sequence], n_clusters: int, folds: npt.NDArray[np.int8] | None = None
+    sequences: list[Sequence],
+    n_clusters: int,
+    folds: npt.NDArray[np.int8] | None = None,
+    cache: RowCache | None = None,
 ) -> tuple[npt.NDArray[np.float64], list[int]]:
     """Every active contig's score under every live cluster's trie, and trie sizes.
 
     With `folds` (0 or 1 per contig), each contig is scored by the trie trained
     on the other fold.  Clusters too small to model are dissolved (members -> -1).
+    With `cache`, a cluster whose members are unchanged since the last call
+    reuses its row instead of retraining; only valid while the active set and
+    the folds stay fixed.
     """
     scores = np.full((n_clusters, len(sequences)), -np.inf)
     states = [0] * n_clusters
     active = [i for i, s in enumerate(sequences) if s.active]
+    oriented = {i: sequences[i].oriented() for i in active}
     for k in range(n_clusters):
         members = [i for i in active if sequences[i].cluster == k]
+        if cache is not None and k in cache and cache[k][0] == members:
+            _, scores[k], states[k] = cache[k]
+            continue
         parts = [members] if folds is None else [[i for i in members if folds[i] == f] for f in (0, 1)]
         if min(len(part) for part in parts) < MIN_CLUSTER:
             for i in members:
@@ -54,7 +68,9 @@ def score_matrix(
             tries.append(trie)
         for i in active:
             trie = tries[0] if folds is None else tries[1 - folds[i]]
-            scores[k, i] = trie.score(sequences[i].oriented())[0]
+            scores[k, i] = trie.score(oriented[i])[0]
+        if cache is not None:
+            cache[k] = (members, scores[k].copy(), states[k])
     return scores, states
 
 
@@ -165,8 +181,10 @@ class KLVBinner(DBVBinner):
         """
         previous: list[int] | None = None
         previous_ll = -np.inf
+        # every contig is active by now, so a cluster's row changes only with its members
+        cache: RowCache = {}
         while True:
-            scores, states = score_matrix(self.sequences, n_clusters, folds)
+            scores, states = score_matrix(self.sequences, n_clusters, folds, cache)
             reassign(self.sequences, scores)
             stats = assignment_stats(self.sequences, scores, states)
             if stats["n_live"] == 0:

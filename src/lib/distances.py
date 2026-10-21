@@ -2,9 +2,8 @@
 
 All distances here are total variation: half the L1 distance between two k-mer
 frequency distributions, so they lie in [0, 1].  This is the distance DistBin,
-VLP and DBV all use; the helpers were factored out of
-`distbin.binner.Binner` so that a new algorithm does not have to import
-DistBin just to featurise its input.
+VLP, DBV and KNN all use, kept here so that none of them has to import
+another binner just to featurise its input.
 """
 
 from typing import Mapping, cast
@@ -13,7 +12,7 @@ import numpy as np
 import numpy.typing as npt
 import scipy
 
-from distbin.kmers import encoded_seq_to_kmer_array, generate_kmer_map, seq_to_kmer_array
+from lib.kmers import encoded_seq_to_kmer_array, generate_kmer_map, seq_to_kmer_array
 
 
 def kmer_distributions(

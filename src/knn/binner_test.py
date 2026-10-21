@@ -3,6 +3,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+import knn.binner
 from knn.binner import Binner, _nearest_mean
 
 
@@ -90,6 +91,34 @@ def test_rejects_bad_params(param: str, value: Any) -> None:
 def test_empty_length_band_leaves_everything_unbinned(n: int) -> None:
     sequences = dict(list(_mixture(n_per_org=1).items())[:n])
     assert _run(sequences, selection_percentiles_low=99.0, selection_percentiles_high=99.5) == ([], set(sequences))
+
+
+def test_residual_graph_is_capped_without_a_main_graph() -> None:
+    """Uncapped, 240 residual contigs get k = 239: a complete graph and one mixed bin."""
+    binner = Binner(_mixture(n_per_org=120, length=1000))
+    bins = binner._recluster_residual(list(binner.sequences), [])
+    assert len(bins) > 1 and not _mixed(bins)
+
+
+def test_unmeasurable_bins_borrow_the_typical_spread() -> None:
+    sequences = _mixture(n_per_org=20)
+    binner = Binner(sequences)
+    labels = sorted(sequences)
+    _, _, _, spread = binner._bin_references([set(labels[:2]), set(labels[2:20]), set(labels[20:])])
+    # two members give two equal internal distances: no sigma of their own
+    assert spread[0] == np.median(spread[1:])
+
+
+def test_tied_scores_admit_only_stage_admit(monkeypatch: pytest.MonkeyPatch) -> None:
+    sequences = _mixture(n_per_org=10)
+    duplicate = sequences["bb_000"]
+    sequences |= {f"dup_{i}": duplicate for i in range(8)}
+    monkeypatch.setattr(knn.binner, "LENGTH_STAGES", (0.0,))
+    binner = Binner(sequences)
+    seed = {l for l in sequences if l.startswith("aa")}
+    bins = binner._assign_staged(sorted(seed) + [f"dup_{i}" for i in range(8)], [seed])
+    # 8 identical candidates: STAGE_ADMIT 0.75 admits 6, not all 8 tied at the cut
+    assert sum(l.startswith("dup") for l in bins[0]) == 6
 
 
 def test_nearest_mean_excludes_self() -> None:

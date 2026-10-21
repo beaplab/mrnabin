@@ -16,7 +16,6 @@ import leidenalg
 import numpy as np
 import numpy.typing as npt
 
-from distbin.evaluate import distance_stats, selected_label_stats
 from knn.graph import (
     BLOCK_SIZE,
     capped_n_neighbors,
@@ -24,11 +23,13 @@ from knn.graph import (
     knn_indices_from_stack,
     mutual_knn_edges,
 )
+from lib.distance_stats import distance_stats, selected_label_stats
 from lib.distances import kmer_distributions, stack_distributions, tv_cdist, tv_distance_matrix
 from lib.evaluate import all_pure, grade_bins
 from lib.selection import select_by_length_percentile, selection_report
 
-SPREAD_FLOOR = 1e-9
+# fewest sampled members whose internal distances give a usable sigma
+MIN_SPREAD_SAMPLE = 3
 
 # Leiden: CPM, swept down from RESOLUTION_START by SWEEP_FACTOR to `resolution_min`
 RESOLUTION_START = 0.5
@@ -85,7 +86,7 @@ class Binner:
         self.n_neighbors = n_neighbors
         self.neighbor_cap = neighbor_cap
         # k actually used for the main graph, after the cap; set by _build_graph
-        self._graph_k = n_neighbors
+        self._graph_k: int | None = None
         self.resolution_min = resolution_min
         self.seed = seed
         self.min_bin_size = min_bin_size
@@ -245,7 +246,11 @@ class Binner:
 
         intra = [_nearest_mean(tv_cdist(s, s), ASSIGN_NEAREST, exclude_self=True) for s in stacks]
         mean = np.array([i.mean() if i.size else 0.0 for i in intra])
-        spread = np.array([i.std() if i.size else 0.0 for i in intra]) + SPREAD_FLOOR
+        spread = np.array([i.std() if i.size >= MIN_SPREAD_SAMPLE else 0.0 for i in intra])
+        # a bin too small or too uniform to measure borrows the typical scale;
+        # a near-zero sigma would push its z towards infinity and lock it out
+        valid = spread > 0
+        spread[~valid] = np.median(spread[valid]) if valid.any() else 1.0
         return centroids, stacks, mean, spread
 
     def _fit_scores(
@@ -255,10 +260,8 @@ class Binner:
         members in each of its top bins.  Looped over bins for fewer, larger cdists.
         """
         d = np.empty(top.shape, dtype=np.float64)
-        for column, bin_index in enumerate(np.unique(top)):
+        for bin_index in np.unique(top):
             rows, slots = np.where(top == bin_index)
-            if rows.size == 0:
-                continue
             block = tv_cdist(chunk_stack[rows], stacks[bin_index])
             d[rows, slots] = _nearest_mean(block, ASSIGN_NEAREST)
         return d
@@ -324,10 +327,9 @@ class Binner:
             top_n = min(ASSIGN_TOP_BINS, len(bins))
             z, winners = self._score_candidates(tranche, centroids, stacks, mean, spread, top_n)
             keep = max(1, int(STAGE_ADMIT * len(tranche)))
-            cut = np.partition(z, keep - 1)[keep - 1]
-            for i, label in enumerate(tranche):
-                if z[i] <= cut:
-                    bins[winners[i]].add(label)
+            # by rank, not by a z cut: ties at the cut would admit past STAGE_ADMIT
+            for i in np.argsort(z, kind="stable")[:keep]:
+                bins[winners[i]].add(tranche[i])
             if self.verbose:
                 verb = f"Stage {stage}: length >= p{pct:g}, {len(tranche)} candidates.\n"
                 print(f"K.3.{stage} {pct if self.compact else verb}", self._one_line_bin_stats(bins))
@@ -344,8 +346,10 @@ class Binner:
             return bins
 
         stack = stack_distributions(self.kmer_distributions, residual)
-        # k follows the main graph's cap; capping on the residual over-splits it
-        edges = mutual_knn_edges(knn_indices_from_stack(stack, self._graph_k, BLOCK_SIZE))
+        # k follows the main graph's cap; capping on the residual over-splits it.
+        # With no main graph (empty length band) the residual's own cap is all there is
+        k = self._graph_k or capped_n_neighbors(self.n_neighbors, len(residual), self.neighbor_cap)
+        edges = mutual_knn_edges(knn_indices_from_stack(stack, k, BLOCK_SIZE))
         # unswept: the residual is cut finely
         fresh = [c for c in self._partition(residual, edges, sweep=False) if len(c) >= RESIDUAL_MIN_BIN_SIZE]
 

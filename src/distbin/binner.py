@@ -15,11 +15,11 @@ import numpy as np
 import numpy.typing as npt
 import scipy
 
-from distbin.evaluate import (
+from lib.distance_stats import (
     distance_stats,
     selected_label_stats,
 )
-from distbin.kmers import encoded_seq_to_kmer_array, generate_kmer_map, seq_to_kmer_array
+from lib.distances import kmer_distributions, stack_distributions, tv_distance_matrix
 from lib.evaluate import all_pure, grade_bins, sequence_stats
 
 
@@ -42,21 +42,13 @@ class Binner:
         **kwargs: str,
     ):
         self.k = k
-        self.kmer_map = generate_kmer_map(k)
         self.sequences = sequences
         self.verbose = verbose
         self.labeled = labeled
         self.compact = compact
         if self.compact:
             self.verbose = True
-        sample = next(iter(sequences.values()), None)
-        if isinstance(sample, np.ndarray):
-            n_kmers = len(self.kmer_map)
-            encoded = cast(dict[str, npt.NDArray[np.int8]], sequences)
-            self.kmer_distributions = {l: encoded_seq_to_kmer_array(s, k, n_kmers) for l, s in encoded.items()}
-        else:
-            strs = cast(dict[str, str], sequences)
-            self.kmer_distributions = {l: seq_to_kmer_array(s, k, self.kmer_map) for l, s in strs.items()}
+        self.kmer_distributions = kmer_distributions(sequences, k)
         self.selection_percentiles = selection_percentiles
         self.creation_threshold = creation_threshold
         self.selection_threshold = selection_threshold
@@ -78,11 +70,15 @@ class Binner:
         start = time.time()
         all_labels = list(self.sequences.keys())
         selection = self._select_labels(self.selection_percentiles[0], self.selection_percentiles[1])
+        if not selection:
+            return [], set(all_labels)
 
         distance_matrix = self._get_distance_matrix(selection)
 
         # create a large set of bins where we are confident that they are all single-species
         initial_bins = self._create_bins(selection, distance_matrix, self.creation_threshold)
+        if not initial_bins:
+            return [], set(all_labels)
 
         # add contigs to the closest bins (min dist to a contig in the bin)
         selection_bins = self._add_to_closest_bin(selection, distance_matrix, initial_bins)
@@ -112,7 +108,7 @@ class Binner:
         low_idx = int(len(self.sequences) * low_pct / 100)
         high_idx = int(len(self.sequences) * high_pct / 100)
         selection = sorted([(len(s), l) for l, s in self.sequences.items()])[low_idx:high_idx]
-        if self.verbose:
+        if self.verbose and selection:
             print("Overall sequence length stats:")
             print(sequence_stats([len(s) for s in self.sequences.values()]))
             print(f"Selected {len(selection)} contigs ranging in length from {selection[0][0]} to {selection[-1][0]}")
@@ -120,9 +116,7 @@ class Binner:
         return [l for (_, l) in selection]
 
     def _get_distance_matrix(self, labels: list[str]) -> npt.NDArray:
-        stack = np.stack([self.kmer_distributions[l] for l in labels])
-        dists = np.astype(scipy.spatial.distance.pdist(stack, "cityblock") / 2, np.float64)
-        matrix = scipy.spatial.distance.squareform(dists)
+        matrix = tv_distance_matrix(stack_distributions(self.kmer_distributions, labels))
 
         if self.verbose:
             print(f"overall stats for all {len(labels)} contigs:")
@@ -152,7 +146,7 @@ class Binner:
 
         if self.verbose:
             verb = f"Creating bins by binning contigs that are within {threshold:.3} of each other.\n"
-            unbinned = set([l for l in labels if l not in set.union(*bins)])
+            unbinned = set([l for l in labels if l not in set().union(*bins)])
             print(
                 f"S.0. {threshold if self.compact else verb}",
                 self._one_line_bin_stats(bins, unbinned),

@@ -1,8 +1,8 @@
 import sys
 from typing import Generator
 
-from distbin.kmers import reverse_complement
 from lib.encoded_sequences import Sequence, encode_seq
+from lib.kmers import reverse_complement
 
 
 def process_peptides(file_path: str) -> dict[str, bool]:

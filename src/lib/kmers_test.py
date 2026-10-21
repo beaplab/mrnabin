@@ -1,6 +1,6 @@
 import numpy as np
 
-from distbin.kmers import (
+from lib.kmers import (
     decode,
     generate_kmer_map,
     reverse_complement,

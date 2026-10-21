@@ -1,4 +1,4 @@
-PHONY: black isort format black_check isort_check format_check mypy flake8 lint test install install_dev
+.PHONY: all pr black isort format black_check isort_check format_check mypy flake8 lint test install install_dev clean
 
 TARGETS=src scripts
 VENV_NAME = .venv

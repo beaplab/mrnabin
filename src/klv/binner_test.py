@@ -88,7 +88,9 @@ def test_merge_that_leaves_no_cluster_is_undone(monkeypatch: pytest.MonkeyPatch)
     before = [s.cluster for s in sequences]
     calls = 0
 
-    def fake_scores(seqs: list[Sequence], n_clusters: int, folds: Any) -> tuple[npt.NDArray[np.float64], list[int]]:
+    def fake_scores(
+        seqs: list[Sequence], n_clusters: int, folds: Any, cache: Any = None
+    ) -> tuple[npt.NDArray[np.float64], list[int]]:
         # first call: two live clusters; after the dissolve, every cluster is
         # too small to model, as score_matrix would report it
         nonlocal calls
@@ -106,3 +108,27 @@ def test_merge_that_leaves_no_cluster_is_undone(monkeypatch: pytest.MonkeyPatch)
     binner._merge(2, np.zeros(len(sequences), dtype=np.int8))
     assert calls == 2
     assert [s.cluster for s in sequences] == before
+
+
+def test_cached_rows_skip_retraining_and_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    sequences = _sequences(n_per_org=10)
+    for i, s in enumerate(sequences):
+        s.cluster, s.active = i // 10, True
+    folds = np.array([0, 1] * 10, dtype=np.int8)
+    cache: klv.binner.RowCache = {}
+    expected, _ = score_matrix(sequences, 2, folds, cache)
+
+    trained: list[int] = []
+    make_model = VLPTrie.make_model
+
+    def counting(self: VLPTrie, k: int, *args: Any, **kwargs: Any) -> None:
+        trained.append(k)
+        make_model(self, k, *args, **kwargs)
+
+    monkeypatch.setattr(VLPTrie, "make_model", counting)
+    scores, _ = score_matrix(sequences, 2, folds, cache)
+    assert trained == [] and np.array_equal(scores, expected)
+    # moving a contig retrains the two clusters it touched, one trie per fold
+    sequences[0].cluster = 1
+    score_matrix(sequences, 2, folds, cache)
+    assert trained == [0, 0, 1, 1]
