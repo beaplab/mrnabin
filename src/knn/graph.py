@@ -1,29 +1,8 @@
-"""Mutual k-nearest-neighbour graph.
+"""Mutual k-nearest-neighbour graph, fed to Leiden in `knn.binner`.
 
-A single global distance threshold cannot separate species, because different
-species have different intrinsic k-mer spread: in one EukProt pair the
-within-species total variation distances averaged 0.201 for one organism and
-0.286 for the other, while the *cross*-species distances started at 0.125.  Any
-constant that keeps the second organism together also merges it with the first.
-
-So build the neighbourhood from distance *ranks* instead of distance values,
-which adapts to whatever the local scale happens to be:
-
-1. `knn_indices` takes each contig's `n_neighbors` nearest others.
-2. `mutual_knn_edges` keeps an edge only if both endpoints chose each other,
-   which discards most of the accidental proximity.
-
-The result is fed to Leiden in `knn.binner`.
-
-This used to reweight each edge by the Jaccard overlap of the two
-neighbourhoods (the standard SNN step) and prune below a threshold.  Both were
-measured and dropped: the threshold was inert across {0.02 .. 0.2} at every k
-tried, and the weighting was worth nothing on separable pairs -- unit weights
-matched it to within 0.001 purity at equal coverage.  It did buy 0.02-0.04
-purity on pairs whose species overlap, so if those matter later it is worth
-restoring; it cost a blocked sparse product that dominated runtime at large k.
-Note that unit weights roughly double every internal edge sum, so CPM
-resolutions are ~2x what they were with Jaccard weights.
+Neighbourhoods come from distance ranks rather than a global threshold, since
+species differ in intrinsic k-mer spread.  Edges are unweighted; Jaccard (SNN)
+weighting was dropped as it only helped on pairs whose species overlap.
 """
 
 import numpy as np
@@ -37,13 +16,9 @@ BLOCK_SIZE = 512
 
 
 def capped_n_neighbors(n_neighbors: int, n: int, divisor: int) -> int:
-    """`n_neighbors`, cut to n // divisor (floor 5).
+    """`n_neighbors`, cut to n // divisor (floor 5); a divisor <= 0 disables it.
 
-    A fixed k sized for tens of thousands of contigs makes the graph nearly
-    complete on a few thousand, and Leiden then merges the organisms -- on
-    `sample_data` (1467 graph nodes) k = 1024 gave one 59/41 bin; k = 183 gives
-    two clean bins beside a mixed one.  The cap keeps k = 1024 on every
-    benchmark mixture's main graph.  A divisor <= 0 disables it.
+    Keeps small inputs from getting a near-complete graph.
     """
     if divisor <= 0:
         return n_neighbors
@@ -82,12 +57,7 @@ def knn_indices(distances: npt.NDArray[np.float64], n_neighbors: int) -> npt.NDA
 def knn_indices_from_stack(
     stack: npt.NDArray[np.float64], n_neighbors: int, block_size: int = BLOCK_SIZE
 ) -> npt.NDArray[np.int64]:
-    """`knn_indices` without ever materialising the n x n distance matrix.
-
-    A dense matrix over a whole mixture is out of reach -- 41k contigs would
-    need 13.7 GB -- but only k columns per row are ever kept, so the distances
-    are computed a row-block at a time and thrown away.
-    """
+    """`knn_indices` computed a row-block at a time, never building the n x n matrix."""
     n = stack.shape[0]
     k = min(n_neighbors, n - 1)
     if k < 1:
@@ -101,12 +71,7 @@ def knn_indices_from_stack(
 
 
 def mutual_knn_edges(knn_idx: npt.NDArray[np.int64]) -> npt.NDArray[np.int64]:
-    """Undirected edge list from a kNN index array, as an (m, 2) array of i < j.
-
-    An edge survives only if both endpoints listed each other, which on these
-    mixtures discards roughly 70% of the directed edges and most of the
-    accidental proximity.
-    """
+    """Edges whose endpoints listed each other, as an (m, 2) array of i < j."""
     n, k = knn_idx.shape
     if n == 0 or k == 0:
         return np.zeros((0, 2), dtype=np.int64)

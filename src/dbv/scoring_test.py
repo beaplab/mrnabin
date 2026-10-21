@@ -85,9 +85,7 @@ class TestWeakestCluster:
 
     def test_keeps_last_cluster_despite_bad_model(self) -> None:
         """With only one live cluster, never cull it — degrade to 1 bin, not 0."""
-        # Single live cluster (cluster 0); cluster 1 has no members. Cluster 0's
-        # per-base mean is below 0.01, which would otherwise trip the bad-model
-        # branch and collapse the binning to zero.
+        # cluster 0's per-base mean is below 0.01, which would trip the bad-model branch
         sequences = [_make_seq("A" * 100, cluster=0) for _ in range(3)]
         scores = [ClusterScore(3), ClusterScore(3)]
         scores[0].scores[:] = [0.1, 0.1, 0.1]

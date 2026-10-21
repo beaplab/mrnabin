@@ -29,24 +29,20 @@ from lib.selection import select_by_length_percentile, selection_report
 
 SPREAD_FLOOR = 1e-9
 
-# Leiden: CPM, not modularity, which has a resolution limit that merges small
-# communities into large ones.  The sweep starts at RESOLUTION_START and steps
-# down by SWEEP_FACTOR, warm-started, to `resolution_min`.
+# Leiden: CPM, swept down from RESOLUTION_START by SWEEP_FACTOR to `resolution_min`
 RESOLUTION_START = 0.5
 SWEEP_FACTOR = 0.7
 N_ITERATIONS = 2
 
 # K.3: shortlist each candidate's ASSIGN_TOP_BINS nearest centroids, then score it
 # by its mean distance to its ASSIGN_NEAREST nearest of ASSIGN_SAMPLE sampled
-# members per bin.  Nearest-member scoring measured neutral against all-member
-# (r@16 0.630 vs 0.633); it is kept because coarse bins are multi-modal.
+# members per bin
 ASSIGN_TOP_BINS = 5
 ASSIGN_SAMPLE = 200
 ASSIGN_NEAREST = 5
 
 # K.3 tranches, as length percentiles, longest first; each admits the best
-# STAGE_ADMIT fraction by z.  +0.060 over a single pass on a length-skewed pair,
-# ~0 elsewhere.  STAGE_ADMIT was never varied.
+# STAGE_ADMIT fraction by z
 LENGTH_STAGES = (75.0, 50.0, 25.0, 0.0)
 STAGE_ADMIT = 0.75
 
@@ -98,15 +94,7 @@ class Binner:
         self.prefix_len = prefix_len
 
     def run(self) -> tuple[list[set[str]], set[str]]:
-        """Bin all sequences and return (bins, unbinned).
-
-        K.0-K.2 build the graph and partition it; `max_bins` optionally keeps
-        only the largest bins as seeds.  K.3 assigns everything else in length
-        tranches that recompute each bin's envelope as it grows, and K.4 lets
-        whatever is still unassigned form its own bins, which is the only way a
-        species the seeding missed can get one.  Whatever remains after all of
-        that is returned unbinned.
-        """
+        """Bin all sequences and return (bins, unbinned)."""
         start = time.time()
         all_labels = list(self.sequences.keys())
         selection = self._select_labels()
@@ -137,11 +125,7 @@ class Binner:
         return selection
 
     def _report_distance_stats(self, labels: list[str], stack: npt.NDArray[np.float64]) -> None:
-        """The pairwise-distance summary DistBin prints, when n allows it.
-
-        Guarded by STATS_MAX_NODES because it needs the dense n x n matrix
-        the rest of the pipeline is careful never to build.
-        """
+        """The pairwise-distance summary DistBin prints, up to STATS_MAX_NODES."""
         if len(labels) > STATS_MAX_NODES:
             print(f"skipping distance stats for {len(labels)} contigs (over {STATS_MAX_NODES})")
             return
@@ -212,18 +196,8 @@ class Binner:
     def _sweep_resolution(self, graph: ig.Graph) -> tuple[list[int], float]:
         """Coarsen by lowering resolution from RESOLUTION_START to `resolution_min`.
 
-        Each step starts Leiden from the previous membership, so the partitions
-        coarsen continuously rather than being re-drawn from scratch.  That
-        matters: warm-started, the two largest communities on one clean pair
-        converged on the two organisms (2 bins >= 32 at 0.991 purity) with no
-        cross-species merge down to 1e-4.
-
-        A fixed resolution cannot be right: the first cross-species merge came
-        at 0.007, 0.0017 and 0.0008 on three mixtures and never on a fourth.
-        And the largest community's growth does not mark it either -- within-
-        species steps grew it by up to 1.5x, cross-species ones by 1.26-1.33x.
-        A veto on merges that looked cross-species was tried and dropped: it
-        refused ~31% of within-species merges and cost 0.13 of r@16.
+        Each step warm-starts Leiden from the previous membership, so the
+        partition coarsens continuously rather than being re-drawn.
         """
         resolution = RESOLUTION_START
         membership = self._leiden(graph, resolution).membership
@@ -253,15 +227,8 @@ class Binner:
     ]:
         """Centroid, member sample, and internal-distance scale for each bin.
 
-        The internal distances are what put every bin on its own scale: a tight
-        bin and a diffuse one are then comparable, which a raw distance
-        comparison never is.
-
-        The scale is of each sampled member's mean distance to its ASSIGN_NEAREST
-        nearest fellow members, not of all pairwise distances.
-        A coarse bin is a union of fine ones, so its all-pairs distances are
-        multi-modal and one (mu, sigma) describes them badly; distances to
-        nearest members stay local however many modes the bin has.
+        The scale is over each sampled member's mean distance to its
+        ASSIGN_NEAREST nearest fellow members, which stays local in multi-modal bins.
         """
         rng = np.random.default_rng(self.seed)
         members = [sorted(b) for b in bins]
@@ -278,11 +245,7 @@ class Binner:
         self, chunk_stack: npt.NDArray[np.float64], top: npt.NDArray[np.int64], stacks: list[npt.NDArray[np.float64]]
     ) -> npt.NDArray[np.float64]:
         """Mean distance from each candidate to its ASSIGN_NEAREST nearest sampled
-        members in each of its top bins.
-
-        Looped over bins rather than candidates: each bin appears in far fewer
-        shortlists than there are candidates, so this is a handful of large
-        cdist calls instead of one tiny call per (candidate, bin) pair.
+        members in each of its top bins.  Looped over bins for fewer, larger cdists.
         """
         d = np.empty(top.shape, dtype=np.float64)
         for column, bin_index in enumerate(np.unique(top)):
@@ -296,16 +259,8 @@ class Binner:
     def _keep_largest(self, bins: list[set[str]]) -> list[set[str]]:
         """Keep only the `max_bins` largest bins as assignment seeds.
 
-        Selection, not merging: the discarded bins' contigs are not lost, they
-        go back into the candidate pool and K.3 re-judges each one individually.
-        That is why this is cheap where merging is ruinous -- reducing 3463 bins
-        to 64 by merging costs 0.43 accuracy, by selection 0.006.
-
-        Ordering by size beat six alternatives (size/radius, size/sd,
-        sqrt-size/radius, two non-redundancy rules, farthest-point) across 13
-        mixtures: it wins or ties on most and is never badly wrong, where the
-        diversity-based rules lose by up to 0.23.  Seeds want to be populated,
-        not distinctive.
+        Selection, not merging: the discarded bins' contigs go back into the
+        candidate pool for K.3.
         """
         if self.max_bins <= 0 or len(bins) <= self.max_bins:
             return bins
@@ -344,23 +299,9 @@ class Binner:
     def _assign_staged(self, labels: list[str], bins: list[set[str]]) -> list[set[str]]:
         """Assign in length tranches, longest first, recomputing envelopes between.
 
-        For candidate p and bin C, z_C = (d(p, C) - mu_C) / sigma_C, where mu_C
-        and sigma_C come from C's own internal distances; p's best bin is argmin
-        z.  Each stage takes the contigs at least as long as a length
-        percentile, admits the best STAGE_ADMIT fraction by z, and defers the
-        rest to a later stage where the enlarged bins may judge them better.
-
-        The point is that seeds cover only 6-10% of a mixture, so mu_C and
-        sigma_C start out estimated from a thin slice; every stage improves them
-        for the next.  Ordering by length matters because a short contig's
-        distances are mostly sampling noise -- populate the bins with reliable
-        long contigs first.
-
-        Measured against a single pass: +0.060 on the pair whose two organisms
-        differ systematically in contig length (its recall parity jumps 0.35 ->
-        0.96 exactly at the p75 -> p50 boundary), and within 0.004 on five of the
-        other seven.  So it is free-or-better, but the gain is specific to
-        length-skewed mixtures rather than general.
+        For candidate p and bin C, z_C = (d(p, C) - mu_C) / sigma_C, from C's
+        own internal distances; p goes to argmin z.  Each stage admits the best
+        STAGE_ADMIT fraction of its tranche and defers the rest.
         """
         if not bins:
             return bins
@@ -388,14 +329,7 @@ class Binner:
     def _recluster_residual(self, labels: list[str], bins: list[set[str]]) -> list[set[str]]:
         """Re-run the graph on whatever is still unassigned and keep what clusters.
 
-        A species whose bins never reached the seed threshold has no seed at all,
-        so the assignment steps can only misfile it.  This gives it a chance to
-        form its own bins instead.  It is the one component here that can create
-        a bin for a species the seeding missed.
-
-        Measured on eight pairs it recovered 5.0-8.0% of each mixture at
-        0.717-0.958 purity, and on two pairs the new bins were *purer* than the
-        main assignment.  It never hurt.
+        This is the only way a species the seeding missed can get a bin.
         """
         assigned = set.union(*bins) if bins else set()
         residual = [l for l in labels if l not in assigned]
@@ -403,12 +337,9 @@ class Binner:
             return bins
 
         stack = stack_distributions(self.kmer_distributions, residual)
-        # the cap follows the main graph's size, not the residual's: capping on
-        # the residual cut k on every benchmark mixture and split it into
-        # small bins (coverage 0.997 -> 0.974, r@16 0.778 -> 0.757 on six)
+        # k follows the main graph's cap; capping on the residual over-splits it
         edges = mutual_knn_edges(knn_indices_from_stack(stack, self._graph_k, BLOCK_SIZE))
-        # one Leiden pass at RESOLUTION_START, unswept: the residual is what fit
-        # no seed, so it is cut finely
+        # unswept: the residual is cut finely
         fresh = [c for c in self._partition(residual, edges, sweep=False) if len(c) >= RESIDUAL_MIN_BIN_SIZE]
 
         if self.verbose:
@@ -418,12 +349,7 @@ class Binner:
 
 
 def _nearest_mean(d: npt.NDArray[np.float64], m: int, exclude_self: bool = False) -> npt.NDArray[np.float64]:
-    """Mean of each row's m smallest distances.
-
-    Members are compared with one fewer candidate than outsiders (themselves
-    excluded), so m is capped at sample size - 1 for both, keeping the two
-    statistics on the same footing.
-    """
+    """Mean of each row's m smallest distances, m capped at columns - 1."""
     m = min(m, max(d.shape[1] - 1, 1))
     if exclude_self:
         if d.shape[1] < 2:

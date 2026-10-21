@@ -10,13 +10,7 @@ from .scoring import find_best_scores, remove_next_cluster
 
 
 def _make_clustered_binner(cluster_seqs: dict[int, list[str]]) -> tuple[VLPBinner, int]:
-    """Create a VLPBinner with sequences assigned to clusters.
-
-    Args:
-        cluster_seqs: mapping from cluster number to list of sequence strings.
-    Returns:
-        (binner, max_cluster_num)
-    """
+    """A VLPBinner with sequences in the given clusters, and the max cluster number."""
     binner = VLPBinner()
     max_k = 0
     for k, seqs in cluster_seqs.items():
@@ -128,9 +122,7 @@ class TestRemoveNextCluster:
     def test_removes_weakest_cluster(self) -> None:
         """The cluster whose members score best elsewhere is the one removed.
 
-        Cluster 3 holds copies of three of cluster 1's members, so cluster 1's
-        model explains them fully; cluster 1's other two members are not in
-        cluster 3's model, and cluster 2 is a different composition.
+        Cluster 3 is a subset of cluster 1, so cluster 1 absorbs it.
         """
         a_rich = _skewed(5, A_RICH, seed=0)
         binner, ncl = _make_clustered_binner({1: a_rich, 2: _skewed(5, GC_RICH, seed=1), 3: a_rich[:3]})

@@ -1,32 +1,23 @@
 # Algorithm parameters
 k: 4
-# A wide band, not DistBin's p85-p95: on one EukProt pair that narrow band held
-# 4045 contigs of one organism against 95 of the other, while the mixture was
-# 69/31. The top 5% is still dropped, as in DistBin, since the longest contigs
-# carry more assembly artefacts.
+# Wider than DistBin's p85-p95, which can starve one organism
 selection_percentiles_low: 45.0
 selection_percentiles_high: 95.0
 
 # Graph construction
-# 1024 rather than 512: Leiden cannot merge across components, and the sweep
-# below needs a connected enough graph to coarsen into few bins.
+# large so the graph is connected enough to coarsen into few bins
 n_neighbors: 1024
-# ...but at most n / neighbor_cap (n = graph nodes), so small inputs do not
-# get a near-complete graph.  0 disables.
+# cap n_neighbors at n / neighbor_cap (n = graph nodes); 0 disables
 neighbor_cap: 8
 
-# Leiden (CPM) sweeps resolution down from 0.5, each step warm-started from the
-# last, so the partition coarsens continuously. 0.002 sits just above the first
-# cross-species merge seen on two of four mixtures (0.0017, 0.0008) but below it
-# on a third (0.007): a floor, not a rule.
+# Leiden (CPM) sweeps resolution down from 0.5 to this floor
 resolution_min: 0.002
 seed: 0
 
 # Bins below this are not seeds; their contigs are reassigned at K.3.
 min_bin_size: 32
 
-# max_bins: keep only the N largest core bins as seeds (0 = keep all). This is
-# selection, not merging -- discarded bins' contigs are re-assigned individually.
+# Keep only the N largest bins as seeds (0 = keep all); the rest are re-assigned.
 max_bins: 0
 
 verbose: false

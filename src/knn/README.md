@@ -1,7 +1,7 @@
 # KNN
 
 Graph clustering of mRNA contigs: a mutual k-nearest-neighbour graph over the
-4-mer distributions, partitioned with Leiden, then every remaining contig
+4-mer distributions, partitioned with Leiden, and remaining contigs
 assigned to the bin whose own internal scale it best fits.
 
 ## Getting Started
@@ -17,7 +17,7 @@ the sorted organism list.
 
 In general the input is a `{label: sequence}` dict of oriented contigs, as
 produced by `lib.fasta.normalize_sequences`, and `Binner.run()` returns
-`(bins, unbinned)` — the same contract as DistBin and DBV.
+`(bins, unbinned)` — the same contract as DistBin.
 
 ## Algorithm
 
@@ -38,10 +38,13 @@ the partition coarsens continuously instead of being redrawn.
 `max_bins` largest bins. Discarded bins' contigs return to the
 candidate pool rather than being dropped.
 
-3. For each contig not in a bin, assign it to the bin whose internal
-scale fits it best (see [Assignment](#assignment)), in length tranches
-from longest to shortest. Each tranche admits its best-fitting 75% and
-defers the rest to the next.
+3. For each contig not in a bin, find the 5 nearest bin centroids, and
+score each bin C by `z_C = (d(p, C) − μ_C) / σ_C`, where `d(p, C)` is
+the mean distance from the contig to its 5 nearest of 200 sampled
+members of C, and μ_C and σ_C are the mean and standard deviation of
+the same statistic for C's own members. The contig joins `argmin z` —
+the bin whose internal scale it fits best. Dividing by σ_C is what
+makes a tight small bin and a loose large one comparable.
 
 4. Any leftover contigs are run through the graph again and may form
 their own bins (of at least 8).
@@ -82,36 +85,3 @@ their own bins (of at least 8).
 * `verbose`, `compact` — per-step logging, in DistBin's format.
 * `labeled`, `prefix_len` — grade bins against organism labels taken as the
   first `prefix_len` characters of each contig id.
-
-## What was tried
-
-**The resolution sweep.** Re-running Leiden cold at each resolution
-produced a "cliff" where purity collapsed in one step. Starting each
-step from the previous membership removed it, but cross-species merges
-still happen late at mixture-dependent resolutions, hence the fixed
-floor. Two stopping rules failed:
-* a jump in the largest community;
-* a merge veto (removed)
-
-**Graph parameters.**
-* `n_neighbors` and `resolution` are one knob: accuracy depends only on the
-  bin count they produce.
-* The floor on bin count is the number of connected components.
-* Large k with low resolution is the worst combination.
-* The length band and min_bin_size are not organism-neutral: minority-organism bins are
-smaller.
-
-
-For each contig not in a bin, shortlist the 5 nearest bin centroids. Score
-each shortlisted bin C as
-
-```
-z_C = (d(p, C) − μ_C) / σ_C
-```
-
-where `d(p, C)` is the mean distance from the contig to its 5 nearest of 200
-sampled members of C, and μ_C and σ_C are the mean and standard deviation of
-the same statistic for C's own members. The contig joins `argmin z` — the bin
-whose internal scale it fits best. Dividing by σ_C is what makes a tight small
-bin and a loose large one comparable. Nothing is refused on z; contigs left
-over are those each length tranche deferred past the last one.

@@ -18,7 +18,7 @@ from .encoded_sequences import (
 
 class TestReadMrnaFile:
     def test_reads_labels_and_sequences(self) -> None:
-        """read_mrna_file_encoded should assign seq_id from the label column and encode the nucleotide column."""
+        """seq_id comes from the label column; the nucleotide column is encoded."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("gene1 ACGT\ngene2 TTAA\n")
             f.flush()

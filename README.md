@@ -69,8 +69,8 @@ KNN builds a mutual k-nearest-neighbour graph over the contigs' 4-mer
 distributions and partitions it with Leiden, coarsening gradually by
 lowering the resolution. It produces very pure bins, but hundreds of
 them per mixture. DistBin compares distances to constants, and no
-constant can fite every combination of species, thus the idea is that
-a mutual graph can be more robust.
+constant can fite every combination of species. The hope is that a
+mutual graph can be more robust.
 
 ### [KLV](src/klv/README.md)
 

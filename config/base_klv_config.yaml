@@ -2,11 +2,8 @@
 # Applied over base_dbv_config.yaml and base_knn_config.yaml, which configure
 # the DBV length schedule and the KNN seeding.
 
-# The largest vlp_seed_bins KNN bins seed VLP; clusters are then dissolved one
-# at a time, scored held out (each contig by the trie of the fold it is not in),
-# until held-out fit per base over all contigs falls by more than vlp_tolerance.
-# The tolerance's good range was 0.002-0.003 on both halves of the merge-path
-# analysis. vlp_holdout: false runs DBV's own in-sample phase instead.
+# The largest vlp_seed_bins KNN bins seed VLP; merging stops when held-out fit
+# per base drops by more than vlp_tolerance. vlp_holdout: false runs DBV's merge.
 vlp_seed_bins: 32
 vlp_holdout: true
 vlp_tolerance: 0.002
