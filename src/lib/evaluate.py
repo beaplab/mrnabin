@@ -163,3 +163,21 @@ def bins_to_cover(bins: list[set[str]], fraction: float = 0.9) -> int:
         if held >= needed:
             return count
     return len(sizes)
+
+
+def fragment_scores(
+    bins: list[set[str]], unassigned: set[str], budgets: tuple[int, ...] = (2, 4, 16, 64), prefix_len: int = 2
+) -> str:
+    """Scores a long tail of tiny bins cannot inflate, for labeled mixtures.
+
+    n90 is `bins_to_cover` at 90%; r@N is `budget_scores` recall with the N
+    largest bins; worst1/worst4 are the lowest `species_completeness` at
+    top=1/4, i.e. how well the worst-captured organism is held by its best bins.
+    """
+    recall = budget_scores(bins, unassigned, budgets, prefix_len)
+    worst = [min(species_completeness(bins, unassigned, top, prefix_len).values(), default=0.0) for top in (1, 4)]
+    return " ".join(
+        [f"n90:{bins_to_cover(bins, 0.9)}"]
+        + [f"r@{n}:{recall[n][1]:.3g}" for n in budgets]
+        + [f"worst1:{worst[0]:.3g}", f"worst4:{worst[1]:.3g}"]
+    )

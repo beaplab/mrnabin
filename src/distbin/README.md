@@ -6,7 +6,7 @@ A simple heuristic for clustering mRNA contigs.
 
 A small example that outputs the performance on a mix of two different species:
 
-`uv run scripts/run_binner.py distbin sample`
+`uv run scripts/sample_labeled_distbin_run.py`
 
 In general, the input should be a FASTA file of mRNA contigs along
 with a peptide file used to orient the contigs.

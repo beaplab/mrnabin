@@ -5,6 +5,12 @@ and VLP trie models merge them down to a handful per mixture.
 
 ## Getting Started
 
+A small example that outputs the performance on a mix of two different species:
+
+`uv run scripts/sample_labeled_klv_run.py`
+
+On your own data:
+
 `uv run scripts/run_binner.py klv file contig_file peptide_file output_file`
 
 The output is the usual TSV of contig id and bin label (`bin_none` for

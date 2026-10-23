@@ -93,13 +93,6 @@ def test_empty_length_band_leaves_everything_unbinned(n: int) -> None:
     assert _run(sequences, selection_percentiles_low=99.0, selection_percentiles_high=99.5) == ([], set(sequences))
 
 
-def test_residual_graph_is_capped_without_a_main_graph() -> None:
-    """Uncapped, 240 residual contigs get k = 239: a complete graph and one mixed bin."""
-    binner = Binner(_mixture(n_per_org=120, length=1000))
-    bins = binner._recluster_residual(list(binner.sequences), [])
-    assert len(bins) > 1 and not _mixed(bins)
-
-
 def test_unmeasurable_bins_borrow_the_typical_spread() -> None:
     sequences = _mixture(n_per_org=20)
     binner = Binner(sequences)

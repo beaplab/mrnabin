@@ -6,6 +6,12 @@ assigned to the bin whose own internal scale they best fit.
 
 ## Getting Started
 
+A small example that outputs the performance on a mix of two different species:
+
+`uv run scripts/sample_labeled_knn_run.py`
+
+On your own data:
+
 `uv run scripts/run_binner.py knn file contig_file peptide_file output_file`
 
 On a labelled EukProt pair:
@@ -70,7 +76,7 @@ returned in `unbinned`.
   config is tuned for mixtures of tens of thousands of contigs. On
   much smaller inputs `n_neighbors: 1024` can approach the contig
   count.
-* `neighbor_cap = 8` - cut `n_neighbors` to n / 8, n being the main graph's
+* `neighbor_cap = 32` - cut `n_neighbors` to n / 32, n being the main graph's
   node count (floor 5); `0` disables. Useful for small n.
 
 **Leiden**

@@ -5,6 +5,7 @@ from lib.evaluate import (
     bins_to_cover,
     budget_scores,
     dump_bins,
+    fragment_scores,
     grade_bins,
     sequence_stats,
     species_completeness,
@@ -62,6 +63,13 @@ def test_bins_to_cover() -> None:
     assert bins_to_cover(bins, 0.9) == 1
     assert bins_to_cover(bins, 0.95) == 2
     assert bins_to_cover([], 0.9) == 0
+
+
+def test_fragment_scores() -> None:
+    bins = [{"AA1", "AA2", "AA3", "BB1"}, {"BB2"}, {"BB3"}]
+    out = fragment_scores(bins, unassigned={"AA4"}, budgets=(1, 3))
+    assert out == "n90:3 r@1:0.429 r@3:0.714 worst1:0.333 worst4:0.667"
+    assert fragment_scores([], set(), budgets=(1,)) == "n90:0 r@1:0 worst1:0 worst4:0"
 
 
 def test_bins_by_id_groups_active_clusters() -> None:

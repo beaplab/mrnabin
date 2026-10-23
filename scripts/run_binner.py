@@ -6,14 +6,16 @@ ALGO is one of distbin, knn, dbv, vlp, klv. DATASET is one of:
 
     file CONTIGS PEPTIDES OUTPUT   bin one transcriptome, write a contig -> bin TSV
     a14                            the A14 symbiont data (paths in config/a14_config.yaml)
-    sample [A B]                   sample_data aa + bb
     5686984 [A B]                  choanoflagellate mixtures
     12417881 [A B]                 EukProt mixtures
 
-The last three are labeled mixtures of two organisms: with no A B every pair is
-swept, printing `i j grade` per pair; A B picks one pair, by index into the
-sorted organism list, EukProt id, or any unique part of a filename. --parallel
-[N] spreads a sweep over N processes (10 if N is omitted).
+The last two are labeled mixtures of two organisms: with no A B every pair is
+swept, printing `i j grade` per pair, or with --names the codes the two
+filenames start with (EP00002, 07) in place of i j; A B picks one pair, by
+index into the sorted organism list, EukProt id, or any unique part of a
+filename. --parallel [N] spreads a sweep over N processes (10 if N is omitted).
+After the grade, each pair's line carries scores that fragmenting into many
+small bins cannot inflate (see lib.evaluate.fragment_scores).
 
     uv run scripts/run_binner.py klv 5686984 --parallel
     uv run scripts/run_binner.py knn 12417881 EP00178 EP00657 --verbose --resolution_min 0.02
@@ -41,7 +43,7 @@ from knn.binner import Binner as KNNBinner
 from lib.a14 import grade_bins_a14, symbiont_bin_details
 from lib.args import get_args
 from lib.encoded_sequences import Sequence, encode_seq, read_mrna_file_encoded
-from lib.evaluate import bins_by_id, dump_bins, grade_bins
+from lib.evaluate import bins_by_id, dump_bins, fragment_scores, grade_bins
 from lib.fasta import get_sequences, normalize_sequences, read_mrna_file
 from vlp.binner import VLPBinner
 
@@ -134,7 +136,6 @@ MRNABIN_PATH = "data/5686984/m_choanoflagellate_transcriptomes.mrnabin"
 EUKPROT_CONTIGS = "data/12417881/assembled_transcriptomes"
 EUKPROT_PEPTIDES = "data/12417881/proteins"
 EUKPROT_PREFIX_LEN = 7
-SAMPLE_PATH = "sample_data"
 
 
 def load_5686984(org: str, encoded: bool) -> Seqs:
@@ -151,14 +152,6 @@ def load_12417881(org: str, encoded: bool) -> Seqs:
     return dict(normalize_sequences(peptides, contigs, prefix, label_col=1))
 
 
-def load_sample(org: str, encoded: bool) -> Seqs:
-    contigs = os.path.join(SAMPLE_PATH, f"{org}_contigs.fasta")
-    peptides = os.path.join(SAMPLE_PATH, f"{org}_peptides.fasta")
-    if encoded:
-        return get_sequences(contigs, peptides, prefix=org)
-    return dict(normalize_sequences(peptides, contigs, org))
-
-
 @dataclass(frozen=True)
 class Mixtures:
     list_orgs: Callable[[], list[str]]
@@ -167,12 +160,16 @@ class Mixtures:
 
 
 MIXTURES = {
-    "sample": Mixtures(lambda: ["aa", "bb"], load_sample),
     "5686984": Mixtures(lambda: sorted(os.listdir(MRNABIN_PATH)), load_5686984),
     "12417881": Mixtures(lambda: sorted(os.listdir(EUKPROT_CONTIGS)), load_12417881, EUKPROT_PREFIX_LEN),
 }
 
 DATASETS = ["file", "a14", *MIXTURES]
+
+
+def org_name(org: str) -> str:
+    """The code an organism's filename starts with, e.g. EP00002 or 07."""
+    return org.split("_")[0]
 
 
 def resolve_org(orgs: list[str], spec: str) -> int:
@@ -196,7 +193,8 @@ def run_pair(task: tuple[str, str, dict[str, Any], int, int, str, str]) -> tuple
     if params["shuffle"]:
         sequences = shuffled(sequences, params["seed"])
     bins, unbinned = run_binner(algo, sequences, params)
-    return i, j, grade_bins(bins, unbinned, prefix_len=mix.prefix_len)
+    grade = grade_bins(bins, unbinned, prefix_len=mix.prefix_len)
+    return i, j, f"{grade} | {fragment_scores(bins, unbinned, prefix_len=mix.prefix_len)}"
 
 
 def run_mixtures(args: argparse.Namespace) -> None:
@@ -218,9 +216,12 @@ def run_mixtures(args: argparse.Namespace) -> None:
         args.verbose = False  # interleaved per-pair logs are useless in parallel
     tasks = [(args.algo, args.dataset, vars(args), i, j, orgs[i], orgs[j]) for i, j in pairs]
 
+    def show(i: int, j: int, grade: str) -> None:
+        print(*((org_name(orgs[i]), org_name(orgs[j])) if args.names else (i, j)), grade, flush=True)
+
     if not args.parallel:
         for task in tasks:
-            print(*run_pair(task), flush=True)
+            show(*run_pair(task))
         return
 
     # Spawned workers import numpy fresh, so they see these; the parent's
@@ -231,7 +232,7 @@ def run_mixtures(args: argparse.Namespace) -> None:
     with ProcessPoolExecutor(max_workers=args.parallel, mp_context=ctx) as ex:
         futures = [ex.submit(run_pair, task) for task in tasks]
         for fut in as_completed(futures):
-            print(*fut.result(), flush=True)
+            show(*fut.result())
 
 
 # --- entry point --------------------------------------------------------------
@@ -287,6 +288,9 @@ def parse_args() -> argparse.Namespace:
         parser.add_argument("org_a", type=str, nargs="?")
         parser.add_argument("org_b", type=str, nargs="?")
         parser.add_argument("--parallel", type=int, nargs="?", const=DEFAULT_WORKERS, default=0, metavar="N")
+        parser.add_argument(
+            "--names", action="store_true", help="print organism codes (EP00002, 07) instead of indices"
+        )
     parser.add_argument("--shuffle", default=True, action=argparse.BooleanOptionalAction)
     parser.add_argument("--seed", type=int, default=0)
 

@@ -63,7 +63,7 @@ class Binner:
         selection_percentiles_low: float = 45.0,
         selection_percentiles_high: float = 95.0,
         n_neighbors: int = 1024,
-        neighbor_cap: int = 8,
+        neighbor_cap: int = 32,
         resolution_min: float = 0.002,
         seed: int = 0,
         min_bin_size: int = 32,

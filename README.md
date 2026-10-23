@@ -28,9 +28,9 @@ to see a small example run.
 The other use-case is to mix together mRNA contigs coming from several different species,
 and see if any of the algorithms can effectively separate them.
 
-Run: `uv run scripts/run_binner.py distbin sample` to see a small example run.
+Run: `uv run scripts/sample_labeled_distbin_run.py` to see a small example run.
 
-`scripts/run_binner.py` also runs every algorithm on the evaluation datasets: `a14`, and the two-organism mixtures `sample`, `5686984` and `12417881`, which sweep every pair (optionally with `--parallel`) or run one chosen pair. See its docstring for details.
+`scripts/run_binner.py` also runs every algorithm on the evaluation datasets: `a14`, and the two-organism mixtures `5686984` and `12417881`, which sweep every pair (optionally with `--parallel`) or run one chosen pair. See its docstring for details.
 
 ## Algorithms
 

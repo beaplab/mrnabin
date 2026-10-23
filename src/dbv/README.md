@@ -4,7 +4,7 @@ DistBin + Variable Length Pattern clustering for mRNA contigs.
 
 ## Getting Started
 
-`uv run scripts/run_binner.py dbv sample`
+`uv run scripts/sample_labeled_dbv_run.py`
 
 To run on your own data:
 
