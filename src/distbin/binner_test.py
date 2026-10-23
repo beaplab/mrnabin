@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from distbin.binner import Binner, _add_to_bins
 
@@ -81,3 +82,20 @@ def test_add_to_closest_bin_median_no_candidates() -> None:
     new_bins, unbinned = binner._add_to_closest_bin_median(["a", "b"], bins, threshold=0.5)
     assert unbinned == set()
     assert sorted([frozenset(b) for b in new_bins]) == sorted([frozenset({"a"}), frozenset({"b"})])
+
+
+@pytest.mark.parametrize(
+    "sequences, percentiles",
+    [
+        ({}, (85.0, 95.0)),
+        # one contig: the 85-95 band is empty
+        ({"a": "ACGT" * 40}, (85.0, 95.0)),
+        # two contigs too far apart for any initial bin
+        ({"a": "ACGTTGCA" * 40, "b": "GGGCCCAT" * 40}, (0.0, 100.0)),
+    ],
+)
+def test_nothing_to_seed_leaves_everything_unbinned(
+    sequences: dict[str, str], percentiles: tuple[float, float]
+) -> None:
+    binner = Binner(sequences, selection_percentiles=percentiles, verbose=True)
+    assert binner.run() == ([], set(sequences))

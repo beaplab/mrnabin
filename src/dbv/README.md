@@ -8,7 +8,7 @@ DistBin + Variable Length Pattern clustering for mRNA contigs.
 
 To run on your own data:
 
-`uv run scripts/run_dbv.py contig_filepath peptide_filepath output_filepath`
+`uv run scripts/run_binner.py dbv file contig_filepath peptide_filepath output_filepath`
 
 ## Algorithm Description
 

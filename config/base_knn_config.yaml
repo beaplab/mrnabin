@@ -1,0 +1,26 @@
+# Algorithm parameters
+k: 4
+# Wider than DistBin's p85-p95, which can starve one organism
+selection_percentiles_low: 45.0
+selection_percentiles_high: 95.0
+
+# Graph construction
+# large so the graph is connected enough to coarsen into few bins
+n_neighbors: 1024
+# cap n_neighbors at n / neighbor_cap (n = graph nodes); 0 disables
+neighbor_cap: 32
+
+# Leiden (CPM) sweeps resolution down from 0.5 to this floor
+resolution_min: 0.002
+seed: 0
+
+# Bins below this are not seeds; their contigs are reassigned at K.3.
+min_bin_size: 32
+
+# Keep only the N largest bins as seeds (0 = keep all); the rest are re-assigned.
+max_bins: 0
+
+verbose: false
+labeled: false
+compact: false
+prefix_len: 2

@@ -11,10 +11,9 @@ import random
 # 3p
 import numpy as np
 
-from distbin.kmers import generate_kmer_map, seq_to_indices
-
 # proj
 from lib.fasta import read_mrna_file
+from lib.kmers import generate_kmer_map, seq_to_indices
 
 
 def main(args: argparse.Namespace) -> None:

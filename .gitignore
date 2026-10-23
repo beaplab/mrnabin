@@ -10,6 +10,7 @@ uv.lock
 .DS_Store
 .claude
 CLAUDE.md
+nohup.out
 
 # local
 data

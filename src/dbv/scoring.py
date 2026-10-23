@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.typing as npt
 
 from lib.encoded_sequences import Sequence
 from vlp.vlp_trie import VLPTrie
@@ -16,6 +17,7 @@ def _score_cluster(
     k: int,
     vlp_trie: VLPTrie,
     sequences: list[Sequence],
+    oriented: list[npt.NDArray[np.int8] | None],
     verbose: bool = False,
 ) -> ClusterScore:
     """score every active sequence against cluster k's model"""
@@ -26,7 +28,8 @@ def _score_cluster(
         if not sequences[i].active:
             continue
         # models are trained on oriented() sequences, so score the same strand
-        seq = sequences[i].oriented()
+        seq = oriented[i]
+        assert seq is not None
         score, var = vlp_trie.score(seq)
         cs.scores[i] = score
 
@@ -57,6 +60,8 @@ def _cluster_size(cluster_num: int, sequences: list[Sequence]) -> int:
 def compute_scores(num_clusters: int, sequences: list[Sequence], verbose: bool) -> list[ClusterScore]:
     """Build a VLP model for each cluster and score every active sequence against it."""
     cluster_scores = []
+    # reverse-complement once per call, not once per cluster
+    oriented = [s.oriented() if s.active else None for s in sequences]
     for k in range(num_clusters):
         # Ignore and dissolve clusters that are too small to build a meaningful model
         if _cluster_size(k, sequences) < 3:
@@ -68,7 +73,7 @@ def compute_scores(num_clusters: int, sequences: list[Sequence], verbose: bool) 
 
         vlp_trie = VLPTrie()
         vlp_trie.make_model(k, sequences, verbose=False)
-        cluster_score = _score_cluster(k, vlp_trie, sequences, verbose=False)
+        cluster_score = _score_cluster(k, vlp_trie, sequences, oriented, verbose=False)
         cluster_scores.append(cluster_score)
     return cluster_scores
 

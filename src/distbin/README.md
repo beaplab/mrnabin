@@ -11,7 +11,7 @@ A small example that outputs the performance on a mix of two different species:
 In general, the input should be a FASTA file of mRNA contigs along
 with a peptide file used to orient the contigs.
 
-`uv run scripts/run_distbin.py contig_filepath peptide_filepath output_filepath`
+`uv run scripts/run_binner.py distbin file contig_filepath peptide_filepath output_filepath`
 
 The script orients the contigs (via `lib.fasta.normalize_sequences`)
 before constructing the `Binner`; `Binner` itself just takes the

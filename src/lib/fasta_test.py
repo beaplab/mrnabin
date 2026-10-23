@@ -46,7 +46,6 @@ def test_process_contigs() -> None:
 
 @patch("lib.fasta.process_peptides", return_value={"id1": False, "id2": True})
 def test_normalize_sequences(mock_process_peptides: MagicMock) -> None:
-    print(type(mock_process_peptides))
     with patch("lib.fasta.open", mock_open(read_data=mock_contigs)) as m:
         sequences = list(normalize_sequences("mock_path_1", "mock_path_2", "AA"))
         assert sequences[0][0] == "AAid1"

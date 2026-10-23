@@ -3,6 +3,8 @@ import sys
 from typing import Any, Callable
 from unittest.mock import patch
 
+import pytest
+
 from lib.args import get_args
 
 
@@ -23,34 +25,26 @@ def _run(
         return get_args(config_paths, parser)
 
 
-def test_single_base_config_defaults() -> None:
-    args = _run([], {"base.yaml": {"k": 5, "name": "foo"}}, ["base.yaml"])
-    assert args.k == 5
-    assert args.name == "foo"
+_LAYERS: dict[str, dict[str, Any]] = {
+    "base.yaml": {"k": 1, "shared": "from_base"},
+    "overlay.yaml": {"k": 2},
+    "custom.yaml": {"k": 3},
+}
 
 
-def test_later_config_overrides_earlier() -> None:
-    files: dict[str, dict[str, Any]] = {"base.yaml": {"k": 1, "shared": "from_base"}, "overlay.yaml": {"k": 2}}
-    args = _run([], files, ["base.yaml", "overlay.yaml"])
-    assert args.k == 2
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        ([], 2),  # later base config over earlier
+        (["--config", "custom.yaml"], 3),  # --config over base configs
+        (["--k", "99"], 99),  # CLI flag over base configs
+        (["--config", "custom.yaml", "--k", "99"], 99),  # CLI flag over --config
+    ],
+)
+def test_precedence(argv: list[str], expected: int) -> None:
+    args = _run(argv, _LAYERS, ["base.yaml", "overlay.yaml"])
+    assert args.k == expected
     assert args.shared == "from_base"
-
-
-def test_cli_flag_overrides_base_config() -> None:
-    args = _run(["--k", "99"], {"base.yaml": {"k": 5}}, ["base.yaml"])
-    assert args.k == 99
-
-
-def test_custom_config_overrides_base() -> None:
-    files = {"base.yaml": {"k": 5}, "custom.yaml": {"k": 50}}
-    args = _run(["--config", "custom.yaml"], files, ["base.yaml"])
-    assert args.k == 50
-
-
-def test_cli_flag_overrides_custom_config() -> None:
-    files = {"base.yaml": {"k": 5}, "custom.yaml": {"k": 50}}
-    args = _run(["--config", "custom.yaml", "--k", "99"], files, ["base.yaml"])
-    assert args.k == 99
 
 
 def test_caller_parser_args_preserved() -> None:
@@ -61,16 +55,11 @@ def test_caller_parser_args_preserved() -> None:
     assert args.k == 5
 
 
-def test_bool_default_true_is_respected() -> None:
-    files = {"base.yaml": {"flag": True}}
-    assert _run([], files, ["base.yaml"]).flag is True
-    assert _run(["--no-flag"], files, ["base.yaml"]).flag is False
-
-
-def test_bool_default_false_is_respected() -> None:
-    files = {"base.yaml": {"flag": False}}
-    assert _run([], files, ["base.yaml"]).flag is False
-    assert _run(["--flag"], files, ["base.yaml"]).flag is True
+@pytest.mark.parametrize("default, flip", [(True, "--no-flag"), (False, "--flag")])
+def test_bool_default_is_respected(default: bool, flip: str) -> None:
+    files = {"base.yaml": {"flag": default}}
+    assert _run([], files, ["base.yaml"]).flag is default
+    assert _run([flip], files, ["base.yaml"]).flag is not default
 
 
 def test_list_type_default_and_override() -> None:
