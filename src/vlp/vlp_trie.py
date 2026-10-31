@@ -311,6 +311,31 @@ def _score_jit(
     return score, var
 
 
+@numba.njit(cache=True)
+def _score_many_jit(
+    flat: npt.NDArray[np.int8],
+    offsets: npt.NDArray[np.int64],
+    idx: npt.NDArray[np.int64],
+    model: npt.NDArray[np.float32],
+    trans_ptr: npt.NDArray[np.int32],
+    last_state: int,
+) -> npt.NDArray[np.float64]:
+    """_score_jit's score for each packed sequence in idx, in one call."""
+    out = np.empty(len(idx))
+    for j in range(len(idx)):
+        i = idx[j]
+        out[j] = _score_jit(flat[offsets[i] : offsets[i + 1]], model, trans_ptr, last_state)[0]
+    return out
+
+
+def pack(sequences: list[npt.NDArray[np.int8]]) -> tuple[npt.NDArray[np.int8], npt.NDArray[np.int64]]:
+    """Concatenate sequences for VLPTrie.score_many: sequence i is flat[offsets[i]:offsets[i + 1]]."""
+    offsets = np.zeros(len(sequences) + 1, dtype=np.int64)
+    np.cumsum([len(s) for s in sequences], out=offsets[1:])
+    flat = np.concatenate(sequences) if sequences else np.zeros(0, dtype=np.int8)
+    return flat.astype(np.int8, copy=False), offsets
+
+
 class VLPTrie:
     """
     Variable Length Pattern Trie
@@ -363,3 +388,10 @@ class VLPTrie:
         and xvar is the sum of squared per-base scores.
         """
         return _score_jit(sequence, self.model, self.trans_ptr, self.num_states)
+
+    def score_many(
+        self, packed: tuple[npt.NDArray[np.int8], npt.NDArray[np.int64]], idx: npt.NDArray[np.int64]
+    ) -> npt.NDArray[np.float64]:
+        """`score(...)[0]` for each sequence in idx of a `pack`ed list, without a Python call per sequence."""
+        flat, offsets = packed
+        return _score_many_jit(flat, offsets, idx, self.model, self.trans_ptr, self.num_states)

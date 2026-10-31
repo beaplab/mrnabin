@@ -15,6 +15,7 @@ from .vlp_trie import (
     _build_training_set,
     _build_vmask,
     _create_and_count_states_jit,
+    pack,
 )
 
 
@@ -186,6 +187,16 @@ class TestVlpScore:
         score, xvar = vlp_trie.score(seq)
         assert score == 0.0
         assert xvar == 0.0
+
+    def test_score_many_matches_score(self) -> None:
+        binner = _make_binner_with_cluster(["ACGT" * 50, "GGCC" * 50, "AACG" * 50])
+        vlp_trie = VLPTrie()
+        vlp_trie.make_model(1, binner.sequences)
+        seqs = [encode_seq(s) for s in ["ACGTACGG", "", "GGCCAATT" * 20, "TTTT"]]
+        idx = np.array([3, 1, 0, 2], dtype=np.int64)
+        expected = [vlp_trie.score(seqs[i])[0] for i in idx]
+        assert vlp_trie.score_many(pack(seqs), idx).tolist() == expected
+        assert vlp_trie.score_many(pack([]), np.zeros(0, dtype=np.int64)).size == 0
 
 
 class TestConnectModel:

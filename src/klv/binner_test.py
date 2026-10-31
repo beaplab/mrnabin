@@ -89,7 +89,7 @@ def test_merge_that_leaves_no_cluster_is_undone(monkeypatch: pytest.MonkeyPatch)
     calls = 0
 
     def fake_scores(
-        seqs: list[Sequence], n_clusters: int, folds: Any, cache: Any = None
+        seqs: list[Sequence], n_clusters: int, folds: Any, cache: Any = None, packed: Any = None
     ) -> tuple[npt.NDArray[np.float64], list[int]]:
         # first call: two live clusters; after the dissolve, every cluster is
         # too small to model, as score_matrix would report it

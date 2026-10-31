@@ -21,7 +21,7 @@ import numpy.typing as npt
 from dbv.binner import DBVBinner
 from knn.binner import Binner
 from lib.encoded_sequences import Sequence
-from vlp.vlp_trie import VLPTrie
+from vlp.vlp_trie import VLPTrie, pack
 
 # clusters with fewer active members (per fold, when held out) are dissolved,
 # as DBV's compute_scores does
@@ -37,6 +37,7 @@ def score_matrix(
     n_clusters: int,
     folds: npt.NDArray[np.int8] | None = None,
     cache: RowCache | None = None,
+    packed: tuple[npt.NDArray[np.int8], npt.NDArray[np.int64]] | None = None,
 ) -> tuple[npt.NDArray[np.float64], list[int]]:
     """Every active contig's score under every live cluster's trie, and trie sizes.
 
@@ -44,12 +45,17 @@ def score_matrix(
     on the other fold.  Clusters too small to model are dissolved (members -> -1).
     With `cache`, a cluster whose members are unchanged since the last call
     reuses its row instead of retraining; only valid while the active set and
-    the folds stay fixed.
+    the folds stay fixed.  `packed` is `pack_oriented(sequences)`, passed in so
+    repeated calls do not rebuild it.
     """
     scores = np.full((n_clusters, len(sequences)), -np.inf)
     states = [0] * n_clusters
     active = [i for i, s in enumerate(sequences) if s.active]
-    oriented = {i: sequences[i].oriented() for i in active}
+    if packed is None:
+        packed = pack_oriented(sequences)
+    # the contigs each fold's trie scores: those in the other fold
+    active_idx = np.array(active, dtype=np.int64)
+    score_idx = [active_idx] if folds is None else [active_idx[folds[active_idx] == 1 - f] for f in (0, 1)]
     for k in range(n_clusters):
         members = [i for i in active if sequences[i].cluster == k]
         if cache is not None and k in cache and cache[k][0] == members:
@@ -60,18 +66,19 @@ def score_matrix(
             for i in members:
                 sequences[i].cluster = -1
             continue
-        tries = []
-        for part in parts:
+        for part, idx in zip(parts, score_idx):
             trie = VLPTrie()
             trie.make_model(k, [sequences[i] for i in part])
             states[k] += trie.num_states
-            tries.append(trie)
-        for i in active:
-            trie = tries[0] if folds is None else tries[1 - folds[i]]
-            scores[k, i] = trie.score(oriented[i])[0]
+            scores[k, idx] = trie.score_many(packed, idx)
         if cache is not None:
             cache[k] = (members, scores[k].copy(), states[k])
     return scores, states
+
+
+def pack_oriented(sequences: list[Sequence]) -> tuple[npt.NDArray[np.int8], npt.NDArray[np.int64]]:
+    """Every contig's oriented strand, packed for VLPTrie.score_many."""
+    return pack([s.oriented() for s in sequences])
 
 
 def reassign(sequences: list[Sequence], scores: npt.NDArray[np.float64]) -> None:
@@ -164,15 +171,22 @@ class KLVBinner(DBVBinner):
 
         n_clusters = self._run_distbin()
         folds = np.random.default_rng(self.seed).integers(0, 2, len(self.sequences)).astype(np.int8)
+        # orientation is fixed at load, so one packing serves every score_matrix call
+        packed = pack_oriented(self.sequences)
         for threshold in self._len_threshs():
             for s in self.sequences:
                 if len(s.seq) >= threshold:
                     s.active = True
-            scores, _ = score_matrix(self.sequences, n_clusters, folds)
+            scores, _ = score_matrix(self.sequences, n_clusters, folds, packed=packed)
             reassign(self.sequences, scores)
-        self._merge(n_clusters, folds)
+        self._merge(n_clusters, folds, packed)
 
-    def _merge(self, n_clusters: int, folds: npt.NDArray[np.int8]) -> None:
+    def _merge(
+        self,
+        n_clusters: int,
+        folds: npt.NDArray[np.int8],
+        packed: tuple[npt.NDArray[np.int8], npt.NDArray[np.int64]] | None = None,
+    ) -> None:
         """Dissolve the most absorbable cluster until held-out fit drops by > vlp_tolerance.
 
         Stops without doing anything if no cluster survived to this point, which
@@ -183,8 +197,10 @@ class KLVBinner(DBVBinner):
         previous_ll = -np.inf
         # every contig is active by now, so a cluster's row changes only with its members
         cache: RowCache = {}
+        if packed is None:
+            packed = pack_oriented(self.sequences)
         while True:
-            scores, states = score_matrix(self.sequences, n_clusters, folds, cache)
+            scores, states = score_matrix(self.sequences, n_clusters, folds, cache, packed)
             reassign(self.sequences, scores)
             stats = assignment_stats(self.sequences, scores, states)
             if stats["n_live"] == 0:
