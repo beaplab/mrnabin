@@ -55,7 +55,7 @@ Variable Length Pattern (VLP) Clustering is a more sophisticated
 method that continually rebuilds tries over the contigs in each bin.
 Instead of combining bins, VLP will destroy bins that are not
 well-modeled by the tries and reassign its contigs. VLP can get quite
-slow as it continually rebuild tries as the bin membership changes.
+slow as it continually rebuilds tries as the bin membership changes.
 
 ### [DBV](src/dbv/README.md)
 
@@ -69,10 +69,10 @@ KNN builds a mutual k-nearest-neighbour graph over the contigs' 4-mer
 distributions and partitions it with Leiden, coarsening gradually by
 lowering the resolution. It produces very pure bins, but hundreds of
 them per mixture. DistBin compares distances to constants, and no
-constant can fite every combination of species. The hope is that a
+constant can fit every combination of species. The hope is that a
 mutual graph can be more robust.
 
-### [KLV](src/klv/README.md)
+### [KLV](src/klv/README.md) \(recommended for best binning performance\)
 
 KLV (KNN + Leiden + VLP) takes KNN's largest bins as seeds and merges
 them with VLP models, scoring every contig with a model it did not
@@ -85,16 +85,22 @@ fall.
 
 ## Testing
 
-We downloaded all of the [assembled transcriptomes from EukProt v03]
-(https://doi.org/10.6084/m9.figshare.12417881.v3). We iteratively
-mixed all pairs of individual transcriptomes to create artificial
-mixtures of two species (or more, depending on the number of species
-in the transcriptome), in which the identity of each contig in the
-mixture is known. We ran DBV on each pairwise mixture and evaluated
-the number of correctly binned contigs (score from 0 to 1) and the
-number of bins produced by DBV. The results are summarized in the
+We downloaded all of the [assembled transcriptomes from EukProt v03](https://doi.org/10.6084/m9.figshare.12417881.v3). We iteratively
+mixed all individual transcriptomes to create artificial
+mixtures of two transcriptomes, in which the origin of each contig in the
+mixture is known. We ran KLV on each of the 7,140 pairwise mixtures and evaluated
+the number of correctly binned contigs and the
+number of bins produced by KLV. The results are summarized in the following table and the
 following figure (note that the scale for the score is not linear, to
 emphasize differences closer to 1).
 
-![Results of DBV on EukProt v03 assembled transcriptomes](mrnabin_DBV_test_EukProt_v03_assembled_transcriptomes.png)
-These results correspond to testing on commit hash `81e6b77`.
+| Feature                         |  Score        |
+| ------------------------------------------------------ | -------- |
+| Mean accuracy (fraction of binned contigs that are correct) | 0.971    |
+| Mean unassigned contigs                                     | 0.057    |
+| Mean efficiency (correct contigs / all contigs)             | 0.916    |
+| Mean ~r@2 (correct contigs in the 2 largest bins)           | 0.719    |
+| Median number of bins                         | 9        |
+
+![Results of KLV on EukProt v03 assembled transcriptomes](mrnabin_KLV_test_EukProt_v03_assembled_transcriptomes.png)
+These results correspond to testing on commit hash `4a72fd8`.
